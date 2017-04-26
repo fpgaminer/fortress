@@ -1,0 +1,28 @@
+[package]
+name = "fortress"
+version = "0.0.1"
+authors = ["fpgaminer"]
+
+[lib]
+name = "fortress"
+path = "src/lib.rs"
+
+[[bin]]
+name = "fortress"
+path = "src/bin.rs"
+
+[dependencies]
+rand = "0.3"
+time = "0.1"
+rustc-serialize = "0.3"
+lazy_static = "0.2"
+serde = "1.0"
+serde_json = "1.0"
+serde_derive = "1.0"
+flate2 = "0.2"
+rust-crypto = "0.2"
+byteorder = "1.0"
+
+[dependencies.gtk]
+version = "0.1.2"
+features = ["v3_10"]
