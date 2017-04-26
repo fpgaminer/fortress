@@ -1,10 +1,10 @@
-#Fortress
+# Fortress
 Remember one password, securely manage the rest.  Fortress is insanely secure and automatically synced between devices.
 
-##Status
+## Status
 Just started building this project.
 
-##Project goals
+## Project goals
 I decided to write my own password manager.  I wanted a password manager that I could trust, with automatic sync, and an easy to use UI.  KeePass, my usual choice, doesn't offer automatic sync and its UI is a little rough around the edges.  Things like LastPass have a notortious history.  So I'm building my own.
 
 * Automatic sync - Easy to use across devices and easy backups.
