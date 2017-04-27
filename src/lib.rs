@@ -8,6 +8,7 @@ extern crate rustc_serialize;
 extern crate flate2;
 extern crate crypto;
 extern crate byteorder;
+extern crate tempdir;
 
 use rand::{OsRng, Rng};
 use flate2::Compression;
@@ -26,7 +27,7 @@ use std::io::{BufRead, Read, Write, Cursor, self};
 use serde::Serialize;
 use byteorder::{ReadBytesExt, WriteBytesExt, LittleEndian};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Eq, PartialEq, Debug)]
 pub struct Entry {
 	#[serde(with = "id_format")]
 	pub id: [u8; 32],
@@ -86,7 +87,7 @@ mod id_format {
 	}
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Eq, PartialEq, Debug)]
 pub struct EntryData {
 	pub title: String,
 	pub username: String,
@@ -109,16 +110,32 @@ impl EntryData {
 	}
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default, Eq, PartialEq, Debug)]
 pub struct Database {
 	pub entries: Vec<Entry>,
 	#[serde(skip_serializing, skip_deserializing)]
-	master_key: [u8; 32],
+	master_key: Option<[u8; 32]>,
 	#[serde(skip_serializing, skip_deserializing)]
 	encryption_parameters: EncryptionParameters,
 }
 
 impl Database {
+	pub fn new_with_password(password: &[u8]) -> Database {
+		let mut db: Database = Default::default();
+		db.master_key = Some(Database::derive_master_key(password, &db.encryption_parameters));
+		db
+	}
+
+	pub fn change_password(&mut self, password: &[u8]) {
+		let mut rng = OsRng::new().expect("OsRng failed to initialize");
+
+		// Refresh salt
+		self.encryption_parameters.salt = rng.gen();
+
+		// Derive the new master key
+		self.master_key = Some(Database::derive_master_key(password, &self.encryption_parameters));
+	}
+
 	pub fn new_entry(&mut self) {
 		let entry = Entry::new();
 		self.entries.push(entry);
@@ -148,7 +165,7 @@ impl Database {
 		};
 
 		// Derive encryption keys
-		let encryption_keys = Database::derive_encryption_keys(&self.master_key, &pbkdf2_salt);
+		let encryption_keys = Database::derive_encryption_keys(&self.master_key.unwrap(), &pbkdf2_salt);
 
 		// Write header
 		Database::write_header(&mut output, &self.encryption_parameters, &pbkdf2_salt)?;
@@ -214,7 +231,7 @@ impl Database {
 		};
 
 		// Save master key and encryption parameters for quicker saving
-		db.master_key = master_key;
+		db.master_key = Some(master_key);
 		db.encryption_parameters = encryption_parameters;
 		Ok(db)
 	}
@@ -323,6 +340,7 @@ impl Database {
 	}
 }
 
+#[derive(Eq, PartialEq, Debug)]
 struct EncryptionParameters {
 	// Parameters for deriving master_key using scrypt
 	pub log_n: u8,
@@ -424,9 +442,69 @@ fn read_file<P: AsRef<Path>>(path: P) -> io::Result<Vec<u8>> {
 	Ok(data)
 }
 
+
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn it_works() {
-    }
+	use rand::{OsRng, Rng};
+	use tempdir::TempDir;
+	use super::{Database, read_file};
+
+	#[test]
+	fn encrypt_then_decrypt() {
+		let mut rng = OsRng::new().expect("OsRng failed to initialize");
+		let password_len = rng.gen_range(0, 64);
+		let password = rng.gen_iter::<u8>().take(password_len).collect::<Vec<u8>>();
+		let tmp_dir = TempDir::new("test").unwrap();
+
+		let mut db = Database::new_with_password(&password);
+		db.new_entry();
+		db.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
+
+		let db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), &password).unwrap();
+
+		assert_eq!(db, db2);
+		db.new_entry();
+		assert!(db != db2);
+	}
+
+	#[test]
+	fn password_change() {
+		let mut db = Database::new_with_password("password".as_bytes());
+		let old_salt = db.encryption_parameters.salt;
+		let old_master_key = db.master_key.unwrap();
+		db.change_password("password".as_bytes());
+		assert!(db.encryption_parameters.salt != old_salt);
+		assert!(db.master_key.unwrap() != old_master_key);
+	}
+
+	// Make sure every encryption uses a different encryption key
+	#[test]
+	fn encryption_is_salted() {
+		let tmp_dir = TempDir::new("test").unwrap();
+
+		let db = Database::new_with_password("password".as_bytes());
+		db.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
+		db.save_to_path(tmp_dir.path().join("test2.fortressdb")).unwrap();
+
+		let encrypted1 = read_file(tmp_dir.path().join("test.fortressdb")).unwrap();
+		let encrypted2 = read_file(tmp_dir.path().join("test2.fortressdb")).unwrap();
+
+		assert!(encrypted1 != encrypted2);
+	}
+
+	// Just some sanity checks on our keys
+	#[test]
+	fn key_sanity_checks() {
+		let db = Database::new_with_password("password".as_bytes());
+		let db2 = Database::new_with_password("password".as_bytes());
+		let zeros = [0u8; 32];
+
+		assert!(db != db2);
+		assert!(db.master_key.unwrap() != db2.master_key.unwrap());
+		assert!(db.master_key.unwrap() != zeros);
+		assert!(db.encryption_parameters.salt != zeros);
+	}
+
+	// TODO: Test all the failure modes of opening a database
+	// TODO: e.g. make sure corrupting the database file results in a checksum failure, make sure a bad mac results in a MAC failure, etc.
 }
