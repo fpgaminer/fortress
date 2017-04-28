@@ -9,6 +9,7 @@ use std::rc::Rc;
 use std::cell::RefCell;
 use rustc_serialize::hex::{ToHex, FromHex};
 use std::env;
+use std::path::PathBuf;
 
 
 macro_rules! clone {
@@ -45,6 +46,11 @@ fn main() {
 	let ui = UiReferences {
 		window: builder.get_object("window1").unwrap(),
 		stack: builder.get_object("stack1").unwrap(),
+
+		stack_child_intro: builder.get_object("stack-child-intro").unwrap(),
+		intro_btn_open: builder.get_object("intro-btn-open").unwrap(),
+		intro_btn_create: builder.get_object("intro-btn-create").unwrap(),
+
 		stack_child_password: builder.get_object("stack-child-password").unwrap(),
 		open_entry_password: builder.get_object("open-entry-password").unwrap(),
 		open_btn_open: builder.get_object("open-btn-open").unwrap(),
@@ -59,7 +65,8 @@ fn main() {
 		entry_url: builder.get_object("entry-url").unwrap(),
 		entry_notes: builder.get_object("entry-notes").unwrap(),
 	};
-	let app = App::new();
+	let mut app = App::default();
+	app.database_path = env::args().nth(1).map(|path| PathBuf::from(path));
 
 	append_column(&ui.tree, 1);
 
@@ -149,15 +156,49 @@ fn main() {
 		let password = ui.open_entry_password.get_text().unwrap();
 		let model = {
 			let mut app = app.borrow_mut();
+			let path = app.database_path.clone().unwrap();
 
-			app.database = fortress::Database::load_from_path(env::args().nth(1).unwrap(), password.as_bytes()).unwrap();
+			app.database = fortress::Database::load_from_path(path, password.as_bytes()).unwrap();
 			create_and_fill_model(&app.database)
 		};
 		ui.tree.set_model(Some(&model));
 		ui.stack.set_visible_child(&ui.stack_child_database);
 	}));
 
-	ui.stack.set_visible_child(&ui.stack_child_password);
+	ui.intro_btn_open.connect_clicked(clone!(app,ui; |_| {
+		// Select a database file to open
+		let dialog = gtk::FileChooserDialog::new(Some("Open Fortress"), Some(&ui.window), gtk::FileChooserAction::Open);
+
+		dialog.add_buttons(&[
+			("Open", gtk::ResponseType::Ok.into()),
+			("Cancel", gtk::ResponseType::Cancel.into())
+		]);
+
+		dialog.set_select_multiple(false);
+		let response = dialog.run();
+		let ok: i32 = gtk::ResponseType::Ok.into();
+		
+		if response == ok {
+			let file = dialog.get_filename();
+
+			if let Some(file) = dialog.get_filename() {
+				let mut app = app.borrow_mut();
+				app.database_path = Some(PathBuf::from(file));
+				ui.stack.set_visible_child(&ui.stack_child_password);
+			}
+		}
+		dialog.destroy();
+	}));
+
+	ui.intro_btn_create.connect_clicked(clone!(app,ui; |_| {
+	}));
+
+	if app.borrow().database_path.is_some() {
+		ui.stack.set_visible_child(&ui.stack_child_password);
+	}
+	else {
+		ui.stack.set_visible_child(&ui.stack_child_intro);
+	}
 
 	ui.window.show_all();
 	gtk::main();
@@ -193,6 +234,10 @@ struct UiReferences {
 	window: gtk::Window,
 	stack: gtk::Stack,
 
+	stack_child_intro: gtk::Widget,
+	intro_btn_open: gtk::Button,
+	intro_btn_create: gtk::Button,
+
 	stack_child_password: gtk::Widget,
 	open_btn_open: gtk::Button,
 	open_entry_password: gtk::Entry,
@@ -209,14 +254,8 @@ struct UiReferences {
 }
 
 
+#[derive(Default)]
 struct App {
 	database: fortress::Database,
-}
-
-impl App {
-	pub fn new() -> App {
-		App {
-			database: Default::default(),
-		}
-	}
+	database_path: Option<PathBuf>,
 }
