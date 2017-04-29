@@ -110,6 +110,7 @@ impl EntryData {
 	}
 }
 
+// TODO: Add a version field
 #[derive(Serialize, Deserialize, Default, Eq, PartialEq, Debug)]
 pub struct Database {
 	pub entries: Vec<Entry>,

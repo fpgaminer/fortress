@@ -181,6 +181,7 @@ impl App {
 		connect!(master, self.ui.btn_save_entry, connect_clicked, on_save_entry);
 		connect!(master, self.ui.open_btn_open, connect_clicked, action_open_database);
 		connect!(master, self.ui.intro_btn_open, connect_clicked, action_select_database);
+		connect!(master, self.ui.intro_btn_create, connect_clicked, action_create_database);
 	}
 
 	fn on_cursor_changed(&mut self) {
@@ -235,21 +236,49 @@ impl App {
 			entry.edit(&entry_data);
 		}
 
-		self.database.save_to_path("test.fortressdb").unwrap();
+		self.database.save_to_path(self.database_path.as_ref().unwrap()).unwrap();
 
 		let model = create_and_fill_model(&self.database);
     	self.ui.tree.set_model(Some(&model));
 	}
 
 	fn action_open_database(&mut self) {
-		// Open database using the password the user entered
 		let password = self.ui.open_entry_password.get_text().unwrap();
-		let path = self.database_path.clone().unwrap();
 
-		self.database = fortress::Database::load_from_path(path, password.as_bytes()).unwrap();
-		let model = create_and_fill_model(&self.database);
-		self.ui.tree.set_model(Some(&model));
-		self.ui.stack.set_visible_child(&self.ui.stack_child_database);
+		if let Some(ref path) = self.database_path {
+			// Open database using the password the user entered
+			self.database = fortress::Database::load_from_path(path, password.as_bytes()).unwrap();
+			let model = create_and_fill_model(&self.database);
+			self.ui.tree.set_model(Some(&model));
+			self.ui.stack.set_visible_child(&self.ui.stack_child_database);
+		}
+		else {
+			// Select where to save the new database
+			let dialog = gtk::FileChooserDialog::new(Some("Create Fortress"), Some(&self.ui.window), gtk::FileChooserAction::Save);
+
+			dialog.add_buttons(&[
+				("Create", gtk::ResponseType::Ok.into()),
+				("Cancel", gtk::ResponseType::Cancel.into())
+			]);
+
+			dialog.set_select_multiple(false);
+			let response = dialog.run();
+			let ok: i32 = gtk::ResponseType::Ok.into();
+		
+			if response == ok {
+				if let Some(file) = dialog.get_filename() {
+					let path = PathBuf::from(file);
+					self.database = fortress::Database::new_with_password(password.as_bytes());
+					self.database.save_to_path(&path).unwrap();
+					self.database_path = Some(path);
+
+					let model = create_and_fill_model(&self.database);
+					self.ui.tree.set_model(Some(&model));
+					self.ui.stack.set_visible_child(&self.ui.stack_child_database);
+				}
+			}
+			dialog.destroy();
+		}
 	}
 
 	fn action_select_database(&mut self) {
@@ -269,8 +298,16 @@ impl App {
 			if let Some(file) = dialog.get_filename() {
 				self.database_path = Some(PathBuf::from(file));
 				self.ui.stack.set_visible_child(&self.ui.stack_child_password);
+				self.ui.open_btn_open.set_label("Open");
 			}
 		}
 		dialog.destroy();
+	}
+
+	fn action_create_database(&mut self) {
+		// Display the password entry panel
+		self.ui.stack.set_visible_child(&self.ui.stack_child_password);
+		self.ui.open_btn_open.set_label("Create");
+		self.database_path = None;
 	}
 }
