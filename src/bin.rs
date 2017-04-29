@@ -122,6 +122,7 @@ builder_ui!(UiReferences;
 	stack_child_database: gtk::Widget,
 	tree: gtk::TreeView,
 	btn_new_entry: gtk::Button,
+	btn_menu: gtk::Button,
 	btn_save_entry: gtk::Button,
 	entry_title: gtk::Entry,
 	entry_username: gtk::Entry,
@@ -185,6 +186,9 @@ impl App {
 		connect!(master, self.ui.open_btn_open, connect_clicked, action_open_database);
 		connect!(master, self.ui.intro_btn_open, connect_clicked, action_select_database);
 		connect!(master, self.ui.intro_btn_create, connect_clicked, action_create_database);
+		connect!(master, self.ui.btn_menu, connect_clicked, action_open_menu);
+		connect!(master, self.ui.menu_btn_close, connect_clicked, action_close_menu);
+		connect!(master, self.ui.menu_btn_change_password, connect_clicked, action_change_password);
 	}
 
 	fn on_cursor_changed(&mut self) {
@@ -248,7 +252,13 @@ impl App {
 	fn action_open_database(&mut self) {
 		let password = self.ui.open_entry_password.get_text().unwrap();
 
-		if let Some(ref path) = self.database_path {
+		if self.ui.open_btn_open.get_label().unwrap() == "Change" {
+			// Change password
+			self.database.change_password(password.as_bytes());
+			self.database.save_to_path(self.database_path.as_ref().unwrap()).unwrap();
+			self.ui.stack.set_visible_child(&self.ui.stack_child_database);
+		}
+		else if let Some(ref path) = self.database_path {
 			// Open database using the password the user entered
 			self.database = fortress::Database::load_from_path(path, password.as_bytes()).unwrap();
 			let model = create_and_fill_model(&self.database);
@@ -312,5 +322,19 @@ impl App {
 		self.ui.stack.set_visible_child(&self.ui.stack_child_password);
 		self.ui.open_btn_open.set_label("Create");
 		self.database_path = None;
+	}
+
+	fn action_open_menu(&mut self) {
+		self.ui.stack.set_visible_child(&self.ui.stack_menu);
+	}
+
+	fn action_close_menu(&mut self) {
+		self.ui.stack.set_visible_child(&self.ui.stack_child_database);
+	}
+
+	fn action_change_password(&mut self) {
+		// Show the password panel
+		self.ui.stack.set_visible_child(&self.ui.stack_child_password);
+		self.ui.open_btn_open.set_label("Change");
 	}
 }
