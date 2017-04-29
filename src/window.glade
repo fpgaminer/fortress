@@ -2,23 +2,23 @@
 <!-- Generated with glade 3.20.0 -->
 <interface>
   <requires lib="gtk+" version="3.20"/>
-  <object class="GtkWindow" id="window1">
+  <object class="GtkWindow" id="window">
     <property name="can_focus">False</property>
     <property name="title" translatable="yes">Fortress</property>
     <property name="default_width">800</property>
     <property name="default_height">500</property>
     <child>
-      <object class="GtkStack" id="stack1">
+      <object class="GtkStack" id="stack">
         <property name="visible">True</property>
         <property name="can_focus">False</property>
         <property name="transition_type">slide-down</property>
         <child>
-          <object class="GtkGrid" id="stack-child-database">
+          <object class="GtkGrid" id="stack_child_database">
             <property name="visible">True</property>
             <property name="can_focus">False</property>
             <property name="column_homogeneous">True</property>
             <child>
-              <object class="GtkTreeView" id="entry-list">
+              <object class="GtkTreeView" id="tree">
                 <property name="visible">True</property>
                 <property name="can_focus">True</property>
                 <property name="vexpand">True</property>
@@ -33,7 +33,7 @@
               </object>
               <packing>
                 <property name="left_attach">0</property>
-                <property name="top_attach">0</property>
+                <property name="top_attach">1</property>
               </packing>
             </child>
             <child>
@@ -55,7 +55,7 @@
                   </packing>
                 </child>
                 <child>
-                  <object class="GtkEntry" id="entry-title">
+                  <object class="GtkEntry" id="entry_title">
                     <property name="visible">True</property>
                     <property name="can_focus">True</property>
                   </object>
@@ -78,7 +78,7 @@
                   </packing>
                 </child>
                 <child>
-                  <object class="GtkEntry" id="entry-user-name">
+                  <object class="GtkEntry" id="entry_username">
                     <property name="visible">True</property>
                     <property name="can_focus">True</property>
                   </object>
@@ -101,7 +101,7 @@
                   </packing>
                 </child>
                 <child>
-                  <object class="GtkEntry" id="entry-password">
+                  <object class="GtkEntry" id="entry_password">
                     <property name="visible">True</property>
                     <property name="can_focus">True</property>
                   </object>
@@ -124,7 +124,7 @@
                   </packing>
                 </child>
                 <child>
-                  <object class="GtkEntry" id="entry-repeat">
+                  <object class="GtkEntry" id="entry_repeat">
                     <property name="visible">True</property>
                     <property name="can_focus">True</property>
                   </object>
@@ -147,7 +147,7 @@
                   </packing>
                 </child>
                 <child>
-                  <object class="GtkEntry" id="entry-url">
+                  <object class="GtkEntry" id="entry_url">
                     <property name="visible">True</property>
                     <property name="can_focus">True</property>
                   </object>
@@ -170,7 +170,7 @@
                   </packing>
                 </child>
                 <child>
-                  <object class="GtkTextView" id="entry-notes">
+                  <object class="GtkTextView" id="entry_notes">
                     <property name="visible">True</property>
                     <property name="can_focus">True</property>
                     <property name="vexpand">True</property>
@@ -181,8 +181,57 @@
                     <property name="position">11</property>
                   </packing>
                 </child>
+                <style>
+                  <class name="edit-box"/>
+                </style>
+              </object>
+              <packing>
+                <property name="left_attach">1</property>
+                <property name="top_attach">1</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkBox">
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
                 <child>
-                  <object class="GtkButton" id="btn-save-entry">
+                  <object class="GtkButton" id="btn_menu">
+                    <property name="label" translatable="yes">Menu</property>
+                    <property name="visible">True</property>
+                    <property name="can_focus">True</property>
+                    <property name="receives_default">True</property>
+                  </object>
+                  <packing>
+                    <property name="expand">False</property>
+                    <property name="fill">True</property>
+                    <property name="position">0</property>
+                  </packing>
+                </child>
+                <child>
+                  <object class="GtkButton" id="btn_new_entry">
+                    <property name="label" translatable="yes">New entry</property>
+                    <property name="visible">True</property>
+                    <property name="can_focus">True</property>
+                    <property name="receives_default">True</property>
+                  </object>
+                  <packing>
+                    <property name="expand">False</property>
+                    <property name="fill">True</property>
+                    <property name="position">1</property>
+                  </packing>
+                </child>
+              </object>
+              <packing>
+                <property name="left_attach">0</property>
+                <property name="top_attach">0</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkBox">
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <child>
+                  <object class="GtkButton" id="btn_save_entry">
                     <property name="label" translatable="yes">Save</property>
                     <property name="visible">True</property>
                     <property name="can_focus">True</property>
@@ -191,29 +240,16 @@
                   <packing>
                     <property name="expand">False</property>
                     <property name="fill">True</property>
-                    <property name="position">12</property>
+                    <property name="position">0</property>
                   </packing>
                 </child>
-                <style>
-                  <class name="edit-box"/>
-                </style>
+                <child>
+                  <placeholder/>
+                </child>
               </object>
               <packing>
                 <property name="left_attach">1</property>
                 <property name="top_attach">0</property>
-                <property name="height">2</property>
-              </packing>
-            </child>
-            <child>
-              <object class="GtkButton" id="btn-new-entry">
-                <property name="label" translatable="yes">New entry</property>
-                <property name="visible">True</property>
-                <property name="can_focus">True</property>
-                <property name="receives_default">True</property>
-              </object>
-              <packing>
-                <property name="left_attach">0</property>
-                <property name="top_attach">1</property>
               </packing>
             </child>
           </object>
@@ -223,7 +259,7 @@
           </packing>
         </child>
         <child>
-          <object class="GtkGrid" id="stack-child-password">
+          <object class="GtkGrid" id="stack_child_password">
             <property name="visible">True</property>
             <property name="can_focus">False</property>
             <child>
@@ -238,7 +274,7 @@
               </packing>
             </child>
             <child>
-              <object class="GtkEntry" id="open-entry-password">
+              <object class="GtkEntry" id="open_entry_password">
                 <property name="visible">True</property>
                 <property name="can_focus">True</property>
               </object>
@@ -248,7 +284,7 @@
               </packing>
             </child>
             <child>
-              <object class="GtkButton" id="open-btn-open">
+              <object class="GtkButton" id="open_btn_open">
                 <property name="label" translatable="yes">Open</property>
                 <property name="visible">True</property>
                 <property name="can_focus">True</property>
@@ -267,11 +303,11 @@
           </packing>
         </child>
         <child>
-          <object class="GtkGrid" id="stack-child-intro">
+          <object class="GtkGrid" id="stack_child_intro">
             <property name="visible">True</property>
             <property name="can_focus">False</property>
             <child>
-              <object class="GtkButton" id="intro-btn-open">
+              <object class="GtkButton" id="intro_btn_open">
                 <property name="label" translatable="yes">Open a Fortress</property>
                 <property name="visible">True</property>
                 <property name="can_focus">True</property>
@@ -283,7 +319,7 @@
               </packing>
             </child>
             <child>
-              <object class="GtkButton" id="intro-btn-create">
+              <object class="GtkButton" id="intro_btn_create">
                 <property name="label" translatable="yes">Create a new Fortress</property>
                 <property name="visible">True</property>
                 <property name="can_focus">True</property>
@@ -299,6 +335,63 @@
             <property name="name">page2</property>
             <property name="title" translatable="yes">page2</property>
             <property name="position">2</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkBox" id="stack_menu">
+            <property name="visible">True</property>
+            <property name="can_focus">False</property>
+            <property name="orientation">vertical</property>
+            <child>
+              <object class="GtkButton" id="menu_btn_close">
+                <property name="label" translatable="yes">X</property>
+                <property name="visible">True</property>
+                <property name="can_focus">True</property>
+                <property name="receives_default">True</property>
+                <property name="halign">start</property>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">False</property>
+                <property name="position">0</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkBox">
+                <property name="visible">True</property>
+                <property name="can_focus">False</property>
+                <property name="orientation">vertical</property>
+                <child>
+                  <object class="GtkButton" id="menu_btn_change_password">
+                    <property name="label" translatable="yes">Change Password</property>
+                    <property name="visible">True</property>
+                    <property name="can_focus">True</property>
+                    <property name="receives_default">True</property>
+                  </object>
+                  <packing>
+                    <property name="expand">False</property>
+                    <property name="fill">True</property>
+                    <property name="position">0</property>
+                  </packing>
+                </child>
+                <child>
+                  <placeholder/>
+                </child>
+                <child>
+                  <placeholder/>
+                </child>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">1</property>
+              </packing>
+            </child>
+          </object>
+          <packing>
+            <property name="name">page3</property>
+            <property name="title" translatable="yes">page3</property>
+            <property name="position">3</property>
           </packing>
         </child>
       </object>

@@ -34,6 +34,27 @@ macro_rules! connect {
 }
 
 
+macro_rules! builder_ui {
+	($ui:ident; $( $name:ident : $t:ty ),* ) => {
+		struct $ui {
+			$(
+				$name: $t,
+			)*
+		}
+
+		impl $ui {
+			fn from_builder(builder: &gtk::Builder) -> Self {
+				Self {
+					$(
+						$name: builder.get_object(stringify!($name)).expect(concat!("Glade missing ", stringify!($name))),
+					)*
+				}
+			}
+		}
+	};
+}
+
+
 fn main() {
 	// Initialize GTK
 	if gtk::init().is_err() {
@@ -86,8 +107,7 @@ struct EventMaster<T> {
 }
 
 
-#[derive(Clone)]
-struct UiReferences {
+builder_ui!(UiReferences;
 	window: gtk::Window,
 	stack: gtk::Stack,
 
@@ -108,7 +128,11 @@ struct UiReferences {
 	entry_password: gtk::Entry,
 	entry_url: gtk::Entry,
 	entry_notes: gtk::TextView,
-}
+
+	stack_menu: gtk::Widget,
+	menu_btn_close: gtk::Button,
+	menu_btn_change_password: gtk::Button
+);
 
 
 struct App {
@@ -121,28 +145,7 @@ struct App {
 impl App {
 	fn new() -> App {
 		let builder = gtk::Builder::new_from_string(include_str!("window.glade"));
-		let ui = UiReferences {
-			window: builder.get_object("window1").unwrap(),
-			stack: builder.get_object("stack1").unwrap(),
-
-			stack_child_intro: builder.get_object("stack-child-intro").unwrap(),
-			intro_btn_open: builder.get_object("intro-btn-open").unwrap(),
-			intro_btn_create: builder.get_object("intro-btn-create").unwrap(),
-
-			stack_child_password: builder.get_object("stack-child-password").unwrap(),
-			open_entry_password: builder.get_object("open-entry-password").unwrap(),
-			open_btn_open: builder.get_object("open-btn-open").unwrap(),
-
-			stack_child_database: builder.get_object("stack-child-database").unwrap(),
-			tree: builder.get_object("entry-list").unwrap(),
-			btn_new_entry: builder.get_object("btn-new-entry").unwrap(),
-			btn_save_entry: builder.get_object("btn-save-entry").unwrap(),
-			entry_title: builder.get_object("entry-title").unwrap(),
-			entry_username: builder.get_object("entry-user-name").unwrap(),
-			entry_password: builder.get_object("entry-password").unwrap(),
-			entry_url: builder.get_object("entry-url").unwrap(),
-			entry_notes: builder.get_object("entry-notes").unwrap(),
-		};
+		let ui = UiReferences::from_builder(&builder);
 		let database_path = env::args().nth(1).map(|path| PathBuf::from(path));
 
 		append_column(&ui.tree, 1);
