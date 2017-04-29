@@ -121,14 +121,17 @@ builder_ui!(UiReferences;
 
 	stack_child_database: gtk::Widget,
 	tree: gtk::TreeView,
-	btn_new_entry: gtk::Button,
-	btn_menu: gtk::Button,
-	btn_save_entry: gtk::Button,
+	database_btn_menu: gtk::Button,
+	database_btn_new_entry: gtk::Button,
+
+	stack_entry: gtk::Widget,
 	entry_title: gtk::Entry,
 	entry_username: gtk::Entry,
 	entry_password: gtk::Entry,
 	entry_url: gtk::Entry,
 	entry_notes: gtk::TextView,
+	entry_btn_save: gtk::Button,
+	entry_btn_close: gtk::Button,
 
 	stack_menu: gtk::Widget,
 	menu_btn_close: gtk::Button,
@@ -136,11 +139,29 @@ builder_ui!(UiReferences;
 );
 
 
+enum AppState {
+	Intro,
+	OpenDatabasePassword,
+	CreateDatabasePassword,
+	ChangePassword,
+	ViewDatabase,
+	EditEntry,
+	Menu,
+}
+
+
 struct App {
-	database: fortress::Database,
+	state: AppState,
+	database: Option<fortress::Database>,
 	database_path: Option<PathBuf>,
 	current_entry_id: Vec<u8>,
 	ui: UiReferences,
+
+	entry_title: String,
+	entry_username: String,
+	entry_password: String,
+	entry_url: String,
+	entry_notes: String,
 }
 
 impl App {
@@ -172,54 +193,121 @@ impl App {
 		ui.window.show_all();
 
 		App {
-			database: fortress::Database::default(),
+			state: AppState::Intro,
+			database: None,
 			database_path: database_path,
 			current_entry_id: Vec::new(),
 			ui: ui,
+			
+			entry_title: String::new(),
+			entry_username: String::new(),
+			entry_password: String::new(),
+			entry_url: String::new(),
+			entry_notes: String::new(),
 		}
+	}
+
+	fn update(&mut self) {
+		match self.state {
+			AppState::Intro => self.ui.stack.set_visible_child(&self.ui.stack_child_intro),
+			AppState::OpenDatabasePassword => {
+				self.ui.stack.set_visible_child(&self.ui.stack_child_password);
+				self.ui.open_btn_open.set_label("Open");
+			},
+			AppState::CreateDatabasePassword => {
+				self.ui.stack.set_visible_child(&self.ui.stack_child_password);
+				self.ui.open_btn_open.set_label("Create");
+			},
+			AppState::ChangePassword => {
+				self.ui.stack.set_visible_child(&self.ui.stack_child_password);
+				self.ui.open_btn_open.set_label("Change");
+			},
+			AppState::ViewDatabase => self.ui.stack.set_visible_child(&self.ui.stack_child_database),
+			AppState::EditEntry => self.ui.stack.set_visible_child(&self.ui.stack_entry),
+			AppState::Menu => self.ui.stack.set_visible_child(&self.ui.stack_menu),
+		}
+
+		self.ui.entry_title.set_text(&self.entry_title);
+		self.ui.entry_username.set_text(&self.entry_username);
+		self.ui.entry_password.set_text(&self.entry_password);
+		self.ui.entry_url.set_text(&self.entry_url);
+		self.ui.entry_notes.get_buffer().unwrap().set_text(&self.entry_notes);
+
+		// TODO: Be more efficient here
+		let model = self.database.as_ref().map(|db| create_and_fill_model(db));
+		self.ui.tree.set_model(model.as_ref());
 	}
 
 	fn connect_events(&self, master: &EventMaster<Self>) {
-		connect!(master, self.ui.tree, connect_cursor_changed, on_cursor_changed);
-		connect!(master, self.ui.btn_new_entry, connect_clicked, on_new_entry);
-		connect!(master, self.ui.btn_save_entry, connect_clicked, on_save_entry);
-		connect!(master, self.ui.open_btn_open, connect_clicked, action_open_database);
-		connect!(master, self.ui.intro_btn_open, connect_clicked, action_select_database);
-		connect!(master, self.ui.intro_btn_create, connect_clicked, action_create_database);
-		connect!(master, self.ui.btn_menu, connect_clicked, action_open_menu);
-		connect!(master, self.ui.menu_btn_close, connect_clicked, action_close_menu);
-		connect!(master, self.ui.menu_btn_change_password, connect_clicked, action_change_password);
+		// Intro
+		connect!(master, self.ui.intro_btn_open, connect_clicked, intro_open_clicked);
+		connect!(master, self.ui.intro_btn_create, connect_clicked, intro_create_clicked);
+
+		// Password
+		connect!(master, self.ui.open_btn_open, connect_clicked, password_btn_clicked);
+
+		// Database View
+		connect!(master, self.ui.tree.get_selection(), connect_changed, on_cursor_changed);
+		connect!(master, self.ui.database_btn_menu, connect_clicked, database_menu_clicked);
+		connect!(master, self.ui.database_btn_new_entry, connect_clicked, database_new_entry_clicked);
+
+		// Entry View
+		connect!(master, self.ui.entry_btn_save, connect_clicked, entry_save_clicked);
+		connect!(master, self.ui.entry_btn_close, connect_clicked, entry_close_clicked);
+
+		// Menu
+		connect!(master, self.ui.menu_btn_close, connect_clicked, menu_close_clicked);
+		connect!(master, self.ui.menu_btn_change_password, connect_clicked, menu_change_password_clicked);
+		
 	}
 
 	fn on_cursor_changed(&mut self) {
+		// HACK: For some reason GTK is trigger two of these events with every click.
+		// The first event is correct, but the second event selects the first item in the list.
+		// This hack will ignore the second event, because we'll be in a different state by then.
+		match self.state {
+			AppState::ViewDatabase => (),
+			_ => return,
+		}
+
 		let selection = self.ui.tree.get_selection();
 
 		if let Some((model, iter)) = selection.get_selected() {
-			let hexid = model.get_value(&iter, 0).get::<String>().unwrap();
-			self.current_entry_id.clear();
-			self.current_entry_id.append(&mut hexid.from_hex().unwrap());
-			let entry = self.database.get_entry_by_id(&self.current_entry_id).unwrap();
-			let entry_data = entry.history.last().unwrap();
+			if let Some(ref mut database) = self.database {
+				let hexid = model.get_value(&iter, 0).get::<String>().unwrap();
+				self.current_entry_id.clear();
+				self.current_entry_id.append(&mut hexid.from_hex().unwrap());
 
-			self.ui.entry_title.set_text(&entry_data.title);
-			self.ui.entry_username.set_text(&entry_data.username);
-			self.ui.entry_password.set_text(&entry_data.password);
-			self.ui.entry_url.set_text(&entry_data.url);
-			self.ui.entry_notes.get_buffer().unwrap().set_text(&entry_data.notes);
+				let entry = database.get_entry_by_id(&self.current_entry_id).unwrap();
+				let entry_data = entry.history.last().unwrap();
+
+				self.entry_title = entry_data.title.clone();
+				self.entry_username = entry_data.username.clone();
+				self.entry_password = entry_data.password.clone();
+				self.entry_url = entry_data.url.clone();
+				self.entry_notes = entry_data.notes.clone();
+
+				self.state = AppState::EditEntry;
+			}
+
+			self.update();
 		}
 	}
 
-	fn on_new_entry(&mut self) {
+	fn database_new_entry_clicked(&mut self) {
 		self.current_entry_id.clear();
 
-		self.ui.entry_title.set_text("");
-		self.ui.entry_username.set_text("");
-		self.ui.entry_password.set_text("");
-		self.ui.entry_url.set_text("");
-		self.ui.entry_notes.get_buffer().unwrap().set_text("");
+		self.entry_title.clear();
+		self.entry_username.clear();
+		self.entry_password.clear();
+		self.entry_url.clear();
+		self.entry_notes.clear();
+
+		self.state = AppState::EditEntry;
+		self.update();
 	}
 
-	fn on_save_entry(&mut self) {
+	fn entry_save_clicked(&mut self) {
 		let notes_buffer = self.ui.entry_notes.get_buffer().unwrap();
 		let entry_data = fortress::EntryData::new(
 			&self.ui.entry_title.get_text().unwrap(),
@@ -235,66 +323,77 @@ impl App {
 			entry.edit(&entry_data);
 			self.current_entry_id.clear();
 			self.current_entry_id.extend_from_slice(&entry.id);
-			self.database.add_entry(entry);
+			self.database.as_mut().unwrap().add_entry(entry);
 		}
 		else {
 			// Edit entry
-			let mut entry = self.database.get_entry_by_id(&self.current_entry_id).unwrap();
+			let mut entry = self.database.as_mut().unwrap().get_entry_by_id(&self.current_entry_id).unwrap();
 			entry.edit(&entry_data);
 		}
 
-		self.database.save_to_path(self.database_path.as_ref().unwrap()).unwrap();
+		self.database.as_ref().unwrap().save_to_path(self.database_path.as_ref().unwrap()).unwrap();
 
-		let model = create_and_fill_model(&self.database);
-    	self.ui.tree.set_model(Some(&model));
+		self.state = AppState::ViewDatabase;
+		self.update();
 	}
 
-	fn action_open_database(&mut self) {
+	fn password_btn_clicked(&mut self) {
 		let password = self.ui.open_entry_password.get_text().unwrap();
 
-		if self.ui.open_btn_open.get_label().unwrap() == "Change" {
-			// Change password
-			self.database.change_password(password.as_bytes());
-			self.database.save_to_path(self.database_path.as_ref().unwrap()).unwrap();
-			self.ui.stack.set_visible_child(&self.ui.stack_child_database);
-		}
-		else if let Some(ref path) = self.database_path {
-			// Open database using the password the user entered
-			self.database = fortress::Database::load_from_path(path, password.as_bytes()).unwrap();
-			let model = create_and_fill_model(&self.database);
-			self.ui.tree.set_model(Some(&model));
-			self.ui.stack.set_visible_child(&self.ui.stack_child_database);
-		}
-		else {
-			// Select where to save the new database
-			let dialog = gtk::FileChooserDialog::new(Some("Create Fortress"), Some(&self.ui.window), gtk::FileChooserAction::Save);
+		match self.state {
+			AppState::OpenDatabasePassword => {
+				self.database = Some(fortress::Database::load_from_path(self.database_path.as_ref().unwrap(), password.as_bytes()).unwrap());
 
-			dialog.add_buttons(&[
-				("Create", gtk::ResponseType::Ok.into()),
-				("Cancel", gtk::ResponseType::Cancel.into())
-			]);
+				self.state = AppState::ViewDatabase;
+				self.update();
+			},
+			AppState::CreateDatabasePassword => {
+				// Select where to save the new database
+				let dialog = gtk::FileChooserDialog::new(Some("Create Fortress"), Some(&self.ui.window), gtk::FileChooserAction::Save);
 
-			dialog.set_select_multiple(false);
-			let response = dialog.run();
-			let ok: i32 = gtk::ResponseType::Ok.into();
-		
-			if response == ok {
-				if let Some(file) = dialog.get_filename() {
-					let path = PathBuf::from(file);
-					self.database = fortress::Database::new_with_password(password.as_bytes());
-					self.database.save_to_path(&path).unwrap();
-					self.database_path = Some(path);
+				dialog.add_buttons(&[
+					("Create", gtk::ResponseType::Ok.into()),
+					("Cancel", gtk::ResponseType::Cancel.into())
+				]);
 
-					let model = create_and_fill_model(&self.database);
-					self.ui.tree.set_model(Some(&model));
-					self.ui.stack.set_visible_child(&self.ui.stack_child_database);
+				dialog.set_select_multiple(false);
+				let response = dialog.run();
+				let ok: i32 = gtk::ResponseType::Ok.into();
+			
+				if response == ok {
+					if let Some(file) = dialog.get_filename() {
+						let path = PathBuf::from(file);
+						let database = fortress::Database::new_with_password(password.as_bytes());
+						database.save_to_path(&path).unwrap();
+						self.database = Some(database);
+						self.database_path = Some(path);
+
+						self.state = AppState::ViewDatabase;
+						self.update();
+					}
+					else {
+						self.state = AppState::Intro;
+						self.update();
+					}
 				}
-			}
-			dialog.destroy();
+				else {
+					self.state = AppState::Intro;
+					self.update();
+				}
+				dialog.destroy();
+			},
+			AppState::ChangePassword => {
+				self.database.as_mut().unwrap().change_password(password.as_bytes());
+				self.database.as_ref().unwrap().save_to_path(self.database_path.as_ref().unwrap()).unwrap();
+
+				self.state = AppState::Menu;
+				self.update();
+			},
+			_ => (),
 		}
 	}
 
-	fn action_select_database(&mut self) {
+	fn intro_open_clicked(&mut self) {
 		// Select a database file to open
 		let dialog = gtk::FileChooserDialog::new(Some("Open Fortress"), Some(&self.ui.window), gtk::FileChooserAction::Open);
 
@@ -310,31 +409,37 @@ impl App {
 		if response == ok {
 			if let Some(file) = dialog.get_filename() {
 				self.database_path = Some(PathBuf::from(file));
-				self.ui.stack.set_visible_child(&self.ui.stack_child_password);
-				self.ui.open_btn_open.set_label("Open");
+				self.ui.window.set_focus(Some(&self.ui.open_entry_password));
+				self.state = AppState::OpenDatabasePassword;
+				self.update();
 			}
 		}
 		dialog.destroy();
 	}
 
-	fn action_create_database(&mut self) {
-		// Display the password entry panel
-		self.ui.stack.set_visible_child(&self.ui.stack_child_password);
-		self.ui.open_btn_open.set_label("Create");
+	fn intro_create_clicked(&mut self) {
+		self.state = AppState::CreateDatabasePassword;
 		self.database_path = None;
+		self.update();
 	}
 
-	fn action_open_menu(&mut self) {
-		self.ui.stack.set_visible_child(&self.ui.stack_menu);
+	fn database_menu_clicked(&mut self) {
+		self.state = AppState::Menu;
+		self.update();
 	}
 
-	fn action_close_menu(&mut self) {
-		self.ui.stack.set_visible_child(&self.ui.stack_child_database);
+	fn menu_close_clicked(&mut self) {
+		self.state = AppState::ViewDatabase;
+		self.update();
 	}
 
-	fn action_change_password(&mut self) {
-		// Show the password panel
-		self.ui.stack.set_visible_child(&self.ui.stack_child_password);
-		self.ui.open_btn_open.set_label("Change");
+	fn menu_change_password_clicked(&mut self) {
+		self.state = AppState::ChangePassword;
+		self.update();
+	}
+
+	fn entry_close_clicked(&mut self) {
+		self.state = AppState::ViewDatabase;
+		self.update();
 	}
 }
