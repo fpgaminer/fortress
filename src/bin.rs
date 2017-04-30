@@ -245,6 +245,7 @@ impl App {
 
 		// Password
 		connect!(master, self.ui.open_btn_open, connect_clicked, password_btn_clicked);
+		connect!(master, self.ui.open_entry_password, connect_activate, password_btn_clicked);
 
 		// Database View
 		connect!(master, self.ui.tree.get_selection(), connect_changed, on_cursor_changed);
