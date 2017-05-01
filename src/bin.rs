@@ -82,7 +82,7 @@ fn create_and_fill_model (database: &Database) -> ListStore {
 	for entry in &database.entries {
 		let hexid = entry.id.to_hex();
 		let entry_data = entry.history.last().unwrap();
-		model.insert_with_values (None, &[0, 1], &[&hexid, &entry_data.title]);
+		model.insert_with_values (None, &[0, 1], &[&hexid, &entry_data.get_title()]);
 	}
 
 	model
@@ -132,10 +132,19 @@ builder_ui!(UiReferences;
 	entry_notes: gtk::TextView,
 	entry_btn_save: gtk::Button,
 	entry_btn_close: gtk::Button,
+	entry_btn_generate_password: gtk::Button,
 
 	stack_menu: gtk::Widget,
 	menu_btn_close: gtk::Button,
-	menu_btn_change_password: gtk::Button
+	menu_btn_change_password: gtk::Button,
+
+	stack_generate: gtk::Widget,
+	generate_spin_count: gtk::SpinButton,
+	generate_chk_uppercase: gtk::CheckButton,
+	generate_chk_lowercase: gtk::CheckButton,
+	generate_chk_numbers: gtk::CheckButton,
+	generate_entry_other: gtk::Entry,
+	generate_btn_generate: gtk::Button
 );
 
 
@@ -147,6 +156,7 @@ enum AppState {
 	ViewDatabase,
 	EditEntry,
 	Menu,
+	GeneratePassword,
 }
 
 
@@ -225,6 +235,7 @@ impl App {
 			AppState::ViewDatabase => self.ui.stack.set_visible_child(&self.ui.stack_child_database),
 			AppState::EditEntry => self.ui.stack.set_visible_child(&self.ui.stack_entry),
 			AppState::Menu => self.ui.stack.set_visible_child(&self.ui.stack_menu),
+			AppState::GeneratePassword => self.ui.stack.set_visible_child(&self.ui.stack_generate),
 		}
 
 		self.ui.entry_title.set_text(&self.entry_title);
@@ -255,11 +266,19 @@ impl App {
 		// Entry View
 		connect!(master, self.ui.entry_btn_save, connect_clicked, entry_save_clicked);
 		connect!(master, self.ui.entry_btn_close, connect_clicked, entry_close_clicked);
+		connect!(master, self.ui.entry_btn_generate_password, connect_clicked, entry_generate_password_clicked);
+		connect!(master, self.ui.entry_title, connect_changed, entry_title_changed);
+		connect!(master, self.ui.entry_username, connect_changed, entry_username_changed);
+		connect!(master, self.ui.entry_password, connect_changed, entry_password_changed);
+		connect!(master, self.ui.entry_url, connect_changed, entry_url_changed);
+		connect!(master, self.ui.entry_notes.get_buffer().unwrap(), connect_changed, entry_notes_changed);
 
 		// Menu
 		connect!(master, self.ui.menu_btn_close, connect_clicked, menu_close_clicked);
 		connect!(master, self.ui.menu_btn_change_password, connect_clicked, menu_change_password_clicked);
 		
+		// Generate View
+		connect!(master, self.ui.generate_btn_generate, connect_clicked, generate_btn_clicked);
 	}
 
 	fn on_cursor_changed(&mut self) {
@@ -282,11 +301,11 @@ impl App {
 				let entry = database.get_entry_by_id(&self.current_entry_id).unwrap();
 				let entry_data = entry.history.last().unwrap();
 
-				self.entry_title = entry_data.title.clone();
-				self.entry_username = entry_data.username.clone();
-				self.entry_password = entry_data.password.clone();
-				self.entry_url = entry_data.url.clone();
-				self.entry_notes = entry_data.notes.clone();
+				self.entry_title = entry_data.get_title().to_string();
+				self.entry_username = entry_data.get_username().to_string();
+				self.entry_password = entry_data.get_password().to_string();
+				self.entry_url = entry_data.get_url().to_string();
+				self.entry_notes = entry_data.get_notes().to_string();
 
 				self.state = AppState::EditEntry;
 			}
@@ -442,5 +461,48 @@ impl App {
 	fn entry_close_clicked(&mut self) {
 		self.state = AppState::ViewDatabase;
 		self.update();
+	}
+
+	fn entry_generate_password_clicked(&mut self) {
+		self.state = AppState::GeneratePassword;
+		self.update();
+	}
+
+	fn generate_btn_clicked(&mut self) {
+		let num_chars = self.ui.generate_spin_count.get_value_as_int();
+		let uppercase_letters = self.ui.generate_chk_uppercase.get_active();
+		let lowercase_letters = self.ui.generate_chk_lowercase.get_active();
+		let numbers = self.ui.generate_chk_numbers.get_active();
+		let other_chars = self.ui.generate_entry_other.get_text().unwrap();
+
+		if !uppercase_letters && !lowercase_letters && !numbers && other_chars.len() == 0 {
+			// TODO: Display an error
+			return;
+		}
+
+		self.entry_password = fortress::random_string(num_chars as usize, uppercase_letters, lowercase_letters, numbers, &other_chars);
+		self.state = AppState::EditEntry;
+		self.update();
+	}
+
+	fn entry_title_changed(&mut self) {
+		self.entry_title = self.ui.entry_title.get_text().unwrap();
+	}
+
+	fn entry_username_changed(&mut self) {
+		self.entry_username = self.ui.entry_username.get_text().unwrap();
+	}
+
+	fn entry_password_changed(&mut self) {
+		self.entry_password = self.ui.entry_password.get_text().unwrap();
+	}
+
+	fn entry_url_changed(&mut self) {
+		self.entry_url = self.ui.entry_url.get_text().unwrap();
+	}
+
+	fn entry_notes_changed(&mut self) {
+		let notes_buffer = self.ui.entry_notes.get_buffer().unwrap();
+		self.entry_notes = notes_buffer.get_text(&notes_buffer.get_start_iter(), &notes_buffer.get_end_iter(), false).unwrap();
 	}
 }

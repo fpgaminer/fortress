@@ -87,14 +87,17 @@ mod id_format {
 	}
 }
 
+// EntryData is basically an immutable structure.
+// Whenever it gets modified through its setters, time_created is updated and a new
+// EntryData is returned.
 #[derive(Clone, Serialize, Deserialize, Eq, PartialEq, Debug)]
 pub struct EntryData {
-	pub title: String,
-	pub username: String,
-	pub password: String,
-	pub url: String,
-	pub notes: String,
-	pub time_created: i64,
+	title: String,
+	username: String,
+	password: String,
+	url: String,
+	notes: String,
+	time_created: i64,
 }
 
 impl EntryData {
@@ -106,6 +109,65 @@ impl EntryData {
 			url: url.to_string(),
 			notes: notes.to_string(),
 			time_created: time::now_utc().to_timespec().sec,
+		}
+	}
+
+	pub fn get_title(&self) -> &str {
+		&self.title
+	}
+
+	pub fn get_username(&self) -> &str {
+		&self.username
+	}
+
+	pub fn get_password(&self) -> &str {
+		&self.password
+	}
+
+	pub fn get_url(&self) -> &str {
+		&self.url
+	}
+
+	pub fn get_notes(&self) -> &str {
+		&self.notes
+	}
+
+	pub fn get_time_created(&self) -> i64 {
+		self.time_created
+	}
+
+	pub fn set_title(&self, title: &str) -> EntryData {
+		EntryData {
+			title: title.to_string(),
+			..self.clone()
+		}
+	}
+
+	pub fn set_username(&self, username: &str) -> EntryData {
+		EntryData {
+			username: username.to_string(),
+			..self.clone()
+		}
+	}
+
+	pub fn set_password(&self, password: &str) -> EntryData {
+		EntryData {
+			password: password.to_string(),
+			..self.clone()
+		}
+	}
+
+	pub fn set_url(&self, url: &str) -> EntryData {
+		EntryData {
+			url: url.to_string(),
+			..self.clone()
+		}
+	}
+
+	pub fn set_notes(&self, notes: &str) -> EntryData {
+		EntryData {
+			notes: notes.to_string(),
+			..self.clone()
 		}
 	}
 }
@@ -444,6 +506,41 @@ fn read_file<P: AsRef<Path>>(path: P) -> io::Result<Vec<u8>> {
 }
 
 
+pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: bool, others: &str) -> String {
+	let mut rng = OsRng::new().expect("OsRng failed to initialize");
+	let alphabet_uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+	let alphabet_lowercase = "abcdefghijklmnopqrstuvwxyz";
+	let alphabet_numbers = "0123456789";
+
+	let mut alphabet = String::from(others);
+
+	if uppercase {
+		alphabet.push_str(alphabet_uppercase);
+	}
+
+	if lowercase {
+		alphabet.push_str(alphabet_lowercase);
+	}
+
+	if numbers {
+		alphabet.push_str(alphabet_numbers);
+	}
+
+	if alphabet.len() == 0 {
+		return String::new();
+	}
+
+	let alphabet_vec: Vec<char> = alphabet.chars().collect();
+	let mut result = String::new();
+
+	for _ in 0..length {
+		result.push(rng.choose(&alphabet_vec).unwrap().clone());
+	}
+
+	result
+}
+
+
 #[cfg(test)]
 mod tests {
 	use rand::{OsRng, Rng};
@@ -508,4 +605,5 @@ mod tests {
 
 	// TODO: Test all the failure modes of opening a database
 	// TODO: e.g. make sure corrupting the database file results in a checksum failure, make sure a bad mac results in a MAC failure, etc.
+	// TODO: Test random_string to make sure it's using the full alphabets, uses the right alphabets based on options, etc.
 }
