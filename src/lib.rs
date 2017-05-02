@@ -173,7 +173,6 @@ impl EntryData {
 	}
 }
 
-// TODO: Add a version field
 #[derive(Serialize, Deserialize, Default, Eq, PartialEq, Debug)]
 pub struct Database {
 	pub entries: Vec<Entry>,
@@ -326,8 +325,8 @@ impl Database {
 
 		cursor.read_until(0, &mut header_string)?;
 
-		// Only scrypt-chacha20 is supported
-		if str::from_utf8(&header_string).unwrap() != "fortress-scrypt-chacha20\0" {
+		// Only v1, scrypt-chacha20 is supported
+		if str::from_utf8(&header_string).unwrap() != "fortress1-scrypt-chacha20\0" {
 			return Err(io::Error::new(io::ErrorKind::Other, "unsupported encryption"));
 		}
 
@@ -394,7 +393,7 @@ impl Database {
 	}
 
 	fn write_header<W: Write>(writer: &mut W, encryption_parameters: &EncryptionParameters, pbkdf2_salt: &[u8; 32]) -> io::Result<()> {
-		writer.write_all(b"fortress-scrypt-chacha20\0")?;
+		writer.write_all(b"fortress1-scrypt-chacha20\0")?;
 		writer.write_u8(encryption_parameters.log_n)?;
 		writer.write_u32::<LittleEndian>(encryption_parameters.r)?;
 		writer.write_u32::<LittleEndian>(encryption_parameters.p)?;
