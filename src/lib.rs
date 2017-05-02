@@ -261,31 +261,7 @@ impl Database {
 	}
 
 	pub fn load_from_path<P: AsRef<Path>>(path: P, password: &[u8]) -> io::Result<Database> {
-		// This block ensures that we deallocate everything we don't need after getting plaintext
-		let (master_key, encryption_parameters, plaintext) = {
-			// Read file
-			let rawdata = read_file(path)?;
-
-			// Verify checksum
-			let header_and_payload = Database::verify_checksum(&rawdata)?;
-
-			// Read header, which includes KDF and encryption parameters
-			let (encryption_parameters, pbkdf2_salt, ciphertext_and_mactag) = Database::read_header(header_and_payload)?;
-
-			// Derive master key from password and database parameters
-			let master_key = Database::derive_master_key(password, &encryption_parameters);
-
-			// Derive encryption keys
-			let encryption_keys = Database::derive_encryption_keys(&master_key, &pbkdf2_salt);
-
-			// Verify mac tag
-			let ciphertext = Database::verify_mac(header_and_payload, ciphertext_and_mactag, &encryption_keys)?;
-
-			// Decrypt
-			let plaintext = Database::decrypt(&encryption_keys, ciphertext);
-
-			(master_key, encryption_parameters, plaintext)
-		};
+		let (_, master_key, encryption_parameters, plaintext) = Database::decrypt_payload_from_path(path, password)?;
 
 		// Decompress and deserialize
 		let mut db: Database = {
@@ -297,6 +273,34 @@ impl Database {
 		db.master_key = Some(master_key);
 		db.encryption_parameters = encryption_parameters;
 		Ok(db)
+	}
+
+
+	// Read and decrypt the payload from the given path
+	// Returns version, master_key, encryption_parameters, and plaintext
+	pub fn decrypt_payload_from_path<P: AsRef<Path>>(path: P, password: &[u8]) -> io::Result<(u32, [u8; 32], EncryptionParameters, Vec<u8>)> {
+		// Read file
+		let rawdata = read_file(path)?;
+
+		// Verify checksum
+		let header_and_payload = Database::verify_checksum(&rawdata)?;
+
+		// Read header, which includes KDF and encryption parameters
+		let (encryption_parameters, pbkdf2_salt, ciphertext_and_mactag) = Database::read_header(header_and_payload)?;
+
+		// Derive master key from password and database parameters
+		let master_key = Database::derive_master_key(password, &encryption_parameters);
+
+		// Derive encryption keys
+		let encryption_keys = Database::derive_encryption_keys(&master_key, &pbkdf2_salt);
+
+		// Verify mac tag
+		let ciphertext = Database::verify_mac(header_and_payload, ciphertext_and_mactag, &encryption_keys)?;
+
+		// Decrypt
+		let plaintext = Database::decrypt(&encryption_keys, ciphertext);
+
+		Ok((1, master_key, encryption_parameters, plaintext))
 	}
 
 	// Given rawdata, which should be data+sha256checksum, this function
@@ -404,7 +408,7 @@ impl Database {
 }
 
 #[derive(Eq, PartialEq, Debug)]
-struct EncryptionParameters {
+pub struct EncryptionParameters {
 	// Parameters for deriving master_key using scrypt
 	pub log_n: u8,
 	pub r: u32,

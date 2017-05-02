@@ -23,6 +23,7 @@ flate2 = "0.2"
 rust-crypto = "0.2"
 byteorder = "1.0"
 tempdir = "0.3"
+clap = "2.23"
 
 [dependencies.gtk]
 version = "0.1.2"

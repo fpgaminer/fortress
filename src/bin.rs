@@ -1,6 +1,8 @@
 extern crate fortress;
 extern crate gtk;
 extern crate rustc_serialize;
+#[macro_use]
+extern crate clap;
 
 use fortress::{Database};
 use gtk::prelude::*;
@@ -11,6 +13,7 @@ use rustc_serialize::hex::{ToHex, FromHex};
 use std::env;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Sender, Receiver};
+use std::io::{self, Write};
 
 
 macro_rules! connect {
@@ -56,6 +59,25 @@ macro_rules! builder_ui {
 
 
 fn main() {
+	let matches = clap::App::new("fortress")
+		.version(crate_version!())
+		.about("Password Manager")
+		.setting(clap::AppSettings::ColoredHelp)
+		.setting(clap::AppSettings::UnifiedHelpMessage)
+		.args_from_usage(
+			"--decrypt               'Just decrypt the specified database, writing the payload to stdout'
+			 --password=[PASSWORD]   'Password to use for --decrypt'
+			 [DATABASE]              'Fortress file to open'")
+		.get_matches();
+
+	if matches.is_present("decrypt") {
+		let password = matches.value_of("password").expect("Missing password argument");
+		let path = matches.value_of("DATABASE").expect("Missing database file");
+
+		do_decrypt(path, password);
+		return;
+	}
+
 	// Initialize GTK
 	if gtk::init().is_err() {
         println!("Failed to initialize GTK.");
@@ -73,6 +95,12 @@ fn main() {
 	event_master.app.borrow().connect_events(&event_master);
 
 	gtk::main();
+}
+
+
+fn do_decrypt(path: &str, password: &str) {
+	let (_, _, _, payload) = fortress::Database::decrypt_payload_from_path(path, password.as_bytes()).unwrap();
+	io::stdout().write(&payload).unwrap();
 }
 
 
