@@ -27,7 +27,7 @@ Of course, this data format is very inefficient, but Fortress has a trick to cou
 
 Using standard formats like Gzip and JSON means that Fortress databases can be manipulated using existing tooling; even on the Linux command line.  Even though this won't be common, it's useful to have if, for example, someone wants to write third-party tools that work with Fortress databases.
 
-The only caveat is encryption.  There's no good, standard encryption format.  So Fortress has to use its own, but again it's very simple.  On the command line Fortress can be commanded to encrypt/decrypt payloads using its encryption format, so it's still possible to easily get at the Gzip'd JSON inside a database (NOTE: TODO: This command line option isn't implemented yet).
+The only caveat is encryption.  There's no good, standard encryption format.  So Fortress has to use its own, but again it's very simple.  On the command line Fortress can be commanded to encrypt/decrypt payloads using its encryption format, so it's still possible to easily get at the Gzip'd JSON inside a database (NOTE: TODO: --encrypt is not implemented yet).
 
 ### Format (V1)
 
