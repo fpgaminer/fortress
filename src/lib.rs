@@ -24,6 +24,7 @@ use std::path::Path;
 use std::fs::File;
 use std::str;
 use std::io::{BufRead, Read, Write, Cursor, self};
+use std::collections::HashSet;
 use serde::Serialize;
 use byteorder::{ReadBytesExt, WriteBytesExt, LittleEndian};
 
@@ -512,29 +513,32 @@ pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: b
 	let alphabet_lowercase = "abcdefghijklmnopqrstuvwxyz";
 	let alphabet_numbers = "0123456789";
 
-	let mut alphabet = String::from(others);
+	// Use a hashset to avoid duplicates caused by "others"
+	let mut alphabet = HashSet::new();
+
+	alphabet.extend(others.chars());
 
 	if uppercase {
-		alphabet.push_str(alphabet_uppercase);
+		alphabet.extend(alphabet_uppercase.chars());
 	}
 
 	if lowercase {
-		alphabet.push_str(alphabet_lowercase);
+		alphabet.extend(alphabet_lowercase.chars());
 	}
 
 	if numbers {
-		alphabet.push_str(alphabet_numbers);
+		alphabet.extend(alphabet_numbers.chars());
 	}
 
 	if alphabet.len() == 0 {
 		return String::new();
 	}
 
-	let alphabet_vec: Vec<char> = alphabet.chars().collect();
+	let alphabet: Vec<char> = alphabet.into_iter().collect();
 	let mut result = String::new();
 
 	for _ in 0..length {
-		result.push(rng.choose(&alphabet_vec).unwrap().clone());
+		result.push(rng.choose(&alphabet).unwrap().clone());
 	}
 
 	result
@@ -545,7 +549,8 @@ pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: b
 mod tests {
 	use rand::{OsRng, Rng};
 	use tempdir::TempDir;
-	use super::{Database, read_file};
+	use super::{Database, read_file, random_string};
+	use std::collections::HashMap;
 
 	#[test]
 	fn encrypt_then_decrypt() {
@@ -603,7 +608,50 @@ mod tests {
 		assert!(db.encryption_parameters.salt != zeros);
 	}
 
+	#[test]
+	fn test_random_string() {
+		assert!(random_string(27, true, true, true, "$%^").len() == 27);
+		assert!(random_string(1, true, true, true, "$%^").len() == 1);
+		assert!(random_string(10, false, true, true, "$%^").len() == 10);
+		assert!(random_string(11, false, false, true, "$%^").len() == 11);
+		assert!(random_string(20, false, false, false, "$%^").len() == 20);
+
+		assert!(random_string(10000, true, false, false, "").contains("A"));
+		assert!(random_string(10000, false, true, false, "").contains("a"));
+		assert!(random_string(10000, false, false, true, "").contains("0"));
+		assert!(random_string(10000, false, false, false, "%").contains("%"));
+
+		assert!(!random_string(10000, true, false, false, "").contains("a"));
+		assert!(!random_string(10000, false, true, false, "").contains("A"));
+		assert!(!random_string(10000, false, false, true, "").contains("A"));
+		assert!(!random_string(10000, false, false, false, "$%^&").contains("A"));
+	}
+
+	#[test]
+	fn test_random_string_randomness() {
+		// A simple randomness test on random_string.
+		// We know the source is good (OsRng) but this makes sure our use of it is correct.
+		// TODO: Not sure if my chi-squared formulas are correct.
+		let mut bins = HashMap::new();
+		let string = random_string(100000, true, true, true, "0%");
+
+		assert!(string.len() == 100000);
+
+		for c in string.chars() {
+			*bins.entry(c).or_insert(0) += 1;
+		}
+
+		let mut chi_squared = 0.0;
+		let e = string.len() as f64 / 63.0;
+		
+		for (_, o) in &bins {
+			chi_squared += ((*o as f64 - e) * (*o as f64 - e)) / e;
+		}
+
+		// 95% confidence
+		assert!(chi_squared < 81.381);
+	}
+
 	// TODO: Test all the failure modes of opening a database
 	// TODO: e.g. make sure corrupting the database file results in a checksum failure, make sure a bad mac results in a MAC failure, etc.
-	// TODO: Test random_string to make sure it's using the full alphabets, uses the right alphabets based on options, etc.
 }
