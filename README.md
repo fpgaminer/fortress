@@ -17,13 +17,13 @@ I decided to write my own password manager.  I wanted a password manager that I 
 
 ### Motivation
 
-At its core, the on-disk format for Fortress is just JSON.  It's simple, portable, and human readable.
+At its core, the on-disk format for Fortress is just encrypted JSON, because JSON simple, portable, and human readable.
 
-The versioning system of Fortress is unique.  Every entry in a Fortress database stores a history, so users can, for example, roll back to previous passwords.  In most systems versioning/history is normally handled using diffs, but Fortress chooses the most naive option: literally store a copy of every version of an entry as a list.  No diffs; just a verbatim copy of every version.
+The versioning system of Fortress is unique.  Every entry in a Fortress database stores a history so users can, for example, roll back to previous passwords.  In most systems versioning/history is normally handled using diffs, but Fortress chooses the most naive option: literally store a copy of every version of an entry as a list.  No diffs; just a verbatim copy of every version.
 
 Why?  It's simple, so it's easy to understand and audit.  That means less chance for bugs, and easier to extend and improve.  Serializing that data structure to JSON couldn't be easier.
 
-Of course, this data format is very inefficient, but Fortress has a trick to counteract that in the on-disk format.  GZip.  After serializing the database to JSON it gets compressed with GZip.  This compression not only counteracts the inefficency of JSON, but the redundancy of each entry's history is compressed away.  In my tests GZip turns an entry from X*N to basically just X+diffs, where X is the size of a entry version structure and N is the number of historical items.  So gzip removes all the redundancy.  We get diffs for free, without any hassle.
+Of course, this data format is very inefficient, but Fortress has a trick to counteract that in the on-disk format.  GZip.  After serializing the database to JSON it gets compressed with GZip.  This compression not only counteracts the inefficency of JSON, but the redundancy of each entry's history is compressed away.  In my tests GZip turns an entry from X*N to basically just X+diffs, where X is the size of an entry version structure and N is the number of historical versions.  So gzip removes all the redundancy.  We get diffs for free, without any hassle.
 
 Using standard formats like Gzip and JSON means that Fortress databases can be manipulated using existing tooling; even on the Linux command line.  Even though this won't be common, it's useful to have if, for example, someone wants to write third-party tools that work with Fortress databases.
 
@@ -31,20 +31,20 @@ The only caveat is encryption.  There's no good, standard encryption format.  So
 
 ### Format (V1)
 
-header_string:  UTF-8 NULL terminated string
-scrypt_log_n:   scrypt parameter (u8)
-scrypt_r:       scrypt parameter (u32 little endian)
-scrypt_p:       scrypt parameter (u32 little endian)
-scrypt_salt:    scrypt parameter (u8 * 32)
-pbkdf2_salt:    pbkdf2 parameter (u8 * 32)
-payload:        The encrypted data (*)
-mac_tag:        HMAC of all proceeding data (u8 * 32)
-checksum:       SHA-256 of all proceeding data (u8 * 32)
+    header_string:  UTF-8 NULL terminated string
+    scrypt_log_n:   scrypt parameter (u8)
+    scrypt_r:       scrypt parameter (u32 little endian)
+    scrypt_p:       scrypt parameter (u32 little endian)
+    scrypt_salt:    scrypt parameter (u8 * 32)
+    pbkdf2_salt:    pbkdf2 parameter (u8 * 32)
+    payload:        The encrypted data (*)
+    mac_tag:        HMAC of all proceeding data (u8 * 32)
+    checksum:       SHA-256 of all proceeding data (u8 * 32)
 
 
 `header_string` (e.g. fortress1-scrypt-chacha20) specifies the format version (e.g. 1) and the encryption used.  V1 only supports one encryption standard, scrypt-chacha20.  In future versions different encryption standards might be supported, and in those cases the file format may be different, e.g. if Poly1305 is used the "mac_tag" field won't be 32 bytes.
 
-To decrypt (using password):
+To decrypt scrypt-chacha20:
 
     verify_sha256_checksum (header+payload+mac_tag, checksum);
 
@@ -68,12 +68,12 @@ Of course, `mac_tag` must **always** be checked before proceeding to chacha20_de
 `plaintext` is now just GZip'd JSON.  The JSON data structure can be understood by looking at the relavant structs in the library code (Database, Entry, EntryData, etc), but because it's JSON it's fairly self explainitory on its own.
 
 
-To encrypt:
+To encrypt scrypt-chacha20:
 
     pbkdf2_salt: [u8; 32] = random (32);
 	chacha_key: [u8; 32], chacha_nonce: [u8; 8], hmac_key: [u8; 32] = pbkdf2_hmac_sha256 (1, pbkdf2_salt, master_key);
 
-	payload = chacha20_encrypt (chacha_key, chacha_nonce, payload);
+	payload = chacha20_encrypt (chacha_key, chacha_nonce, plaintext);
 
 	mac_tag = hmac_sha256 (hmac_key, header+payload);
 	checksum = sha256 (header+payload+mac_tag);
