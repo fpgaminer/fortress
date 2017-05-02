@@ -548,8 +548,9 @@ pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: b
 #[cfg(test)]
 mod tests {
 	use rand::{OsRng, Rng};
+	use rand::chacha::ChaChaRng;
 	use tempdir::TempDir;
-	use super::{Database, read_file, random_string};
+	use super::{Database, read_file, random_string, Entry, EntryData};
 	use std::collections::HashMap;
 
 	#[test]
@@ -648,8 +649,99 @@ mod tests {
 			chi_squared += ((*o as f64 - e) * (*o as f64 - e)) / e;
 		}
 
-		// 95% confidence
-		assert!(chi_squared < 81.381);
+		// >335.9 will basically never happen by chance
+		assert!(chi_squared < 335.9);
+	}
+
+	#[test]
+	fn test_database() {
+		let tmp_dir = TempDir::new("test").unwrap();
+		let mut rng = OsRng::new().expect("OsRng failed to initialize");
+		let seed1: u64 = rng.next_u64();
+		let seed2: u64 = rng.next_u64();
+
+		// Build a random database
+		let mut rng = ChaChaRng::new_unseeded();
+		rng.set_counter(seed1, seed2);
+		let mut rng2 = ChaChaRng::new_unseeded();
+		rng2.set_counter(seed1, seed2);
+		let password = rng.gen_iter::<char>().take(20).collect::<String>();
+
+		let mut db = Database::new_with_password(password.as_bytes());
+		let number_of_entries: usize = rng.gen_range(1, 16);
+
+		for _ in 0..number_of_entries {
+			let mut entry = Entry::new();
+			let number_of_edits: usize = rng.gen_range(0, 8);
+
+			for _ in 0..number_of_edits {
+				entry.edit(&EntryData::new(
+					&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
+					&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
+					&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
+					&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
+					&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()
+				));
+			}
+
+			db.add_entry(entry);
+		}
+
+		// Save
+		db.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
+
+		// Load
+		let mut db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), password.as_bytes()).unwrap();
+
+		// Edit
+		{
+			let entry = rng.choose_mut(&mut db2.entries).unwrap();
+			entry.edit(&EntryData::new(
+				&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
+				&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
+				&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
+				&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
+				&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()
+			));
+		}
+
+		// Save
+		db2.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
+
+		// Compare using the original random stream
+		let mut rng = ChaChaRng::new_unseeded();
+		rng.set_counter(seed1, seed2);
+		let mut rng2 = ChaChaRng::new_unseeded();
+		rng2.set_counter(seed1, seed2);
+		let password = rng.gen_iter::<char>().take(20).collect::<String>();
+
+		let db3 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), password.as_bytes()).unwrap();
+		assert_eq!(db2, db3);
+
+		let number_of_entries: usize = rng.gen_range(1, 16);
+
+		for i in 0..number_of_entries {
+			let entry = &db3.entries[i];
+			let number_of_edits: usize = rng.gen_range(0, 8);
+
+			for j in 0..number_of_edits {
+				let history = &entry.history[j];
+				assert!(history.get_title() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
+				assert!(history.get_username() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
+				assert!(history.get_password() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
+				assert!(history.get_url() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
+				assert!(history.get_notes() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
+			}
+		}
+
+		let entry = rng.choose(&db3.entries).unwrap();
+		let latest = entry.read_latest().unwrap();
+
+		assert!(latest.get_title() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
+		assert!(latest.get_username() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
+		assert!(latest.get_password() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
+		assert!(latest.get_url() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
+		assert!(latest.get_notes() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
 	}
 
 	// TODO: Test all the failure modes of opening a database
