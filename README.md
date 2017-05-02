@@ -12,3 +12,75 @@ I decided to write my own password manager.  I wanted a password manager that I 
 * Written in Rust - Less bugs, cleaner code.
 * Simple design - I opt for simplicity over performance; easier to audit the code and design.
 * Trustless - The code is open source.  Data sync is end-to-end encrypted.
+
+## Database Format
+
+### Motivation
+
+At its core, the on-disk format for Fortress is just JSON.  It's simple, portable, and human readable.
+
+The versioning system of Fortress is unique.  Every entry in a Fortress database stores a history, so users can, for example, roll back to previous passwords.  In most systems versioning/history is normally handled using diffs, but Fortress chooses the most naive option: literally store a copy of every version of an entry as a list.  No diffs; just a verbatim copy of every version.
+
+Why?  It's simple, so it's easy to understand and audit.  That means less chance for bugs, and easier to extend and improve.  Serializing that data structure to JSON couldn't be easier.
+
+Of course, this data format is very inefficient, but Fortress has a trick to counteract that in the on-disk format.  GZip.  After serializing the database to JSON it gets compressed with GZip.  This compression not only counteracts the inefficency of JSON, but the redundancy of each entry's history is compressed away.  In my tests GZip turns an entry from X*N to basically just X+diffs, where X is the size of a entry version structure and N is the number of historical items.  So gzip removes all the redundancy.  We get diffs for free, without any hassle.
+
+Using standard formats like Gzip and JSON means that Fortress databases can be manipulated using existing tooling; even on the Linux command line.  Even though this won't be common, it's useful to have if, for example, someone wants to write third-party tools that work with Fortress databases.
+
+The only caveat is encryption.  There's no good, standard encryption format.  So Fortress has to use its own, but again it's very simple.  On the command line Fortress can be commanded to encrypt/decrypt payloads using its encryption format, so it's still possible to easily get at the Gzip'd JSON inside a database (NOTE: TODO: This command line option isn't implemented yet).
+
+### Format (V1)
+
+header_string:  UTF-8 NULL terminated string
+scrypt_log_n:   scrypt parameter (u8)
+scrypt_r:       scrypt parameter (u32 little endian)
+scrypt_p:       scrypt parameter (u32 little endian)
+scrypt_salt:    scrypt parameter (u8 * 32)
+pbkdf2_salt:    pbkdf2 parameter (u8 * 32)
+payload:        The encrypted data (*)
+mac_tag:        HMAC of all proceeding data (u8 * 32)
+checksum:       SHA-256 of all proceeding data (u8 * 32)
+
+
+`header_string` (e.g. fortress1-scrypt-chacha20) specifies the format version (e.g. 1) and the encryption used.  V1 only supports one encryption standard, scrypt-chacha20.  In future versions different encryption standards might be supported, and in those cases the file format may be different, e.g. if Poly1305 is used the "mac_tag" field won't be 32 bytes.
+
+To decrypt (using password):
+
+    verify_sha256_checksum (header+payload+mac_tag, checksum);
+
+    master_key = scrypt (scrypt_log_n, scrypt_r, scrypt_p, scrypt_salt, password);
+
+    chacha_key: [u8; 32], chacha_nonce: [u8; 8], hmac_key: [u8; 32] = pbkdf2_hmac_sha256 (1, pbkdf2_salt, master_key);
+
+    // Do NOT save pbkdf2_salt; throw it away now.
+
+    verify_hmac_sha256 (hmac_key, header+payload, mac_tag);
+
+    plaintext = chacha20_decrypt (chacha_key, chacha_nonce, payload);
+
+
+We use scrypt to derive a `master_key` and then use PBKDF2 to expand the `master_key` into all the keys we need for the rest of the cryptographic primitives; in this case ChaCha20 and HMAC.  (See the description of encryption for why PBKDF2 is used after scrypt).
+
+The `checksum` field lets us determine if the database is corrupt.  HMAC kinda does that can't differentiate a bad password versus corruption.
+
+Of course, `mac_tag` must **always** be checked before proceeding to chacha20_decrypt.
+
+`plaintext` is now just GZip'd JSON.  The JSON data structure can be understood by looking at the relavant structs in the library code (Database, Entry, EntryData, etc), but because it's JSON it's fairly self explainitory on its own.
+
+
+To encrypt:
+
+    pbkdf2_salt: [u8; 32] = random (32);
+	chacha_key: [u8; 32], chacha_nonce: [u8; 8], hmac_key: [u8; 32] = pbkdf2_hmac_sha256 (1, pbkdf2_salt, master_key);
+
+	payload = chacha20_encrypt (chacha_key, chacha_nonce, payload);
+
+	mac_tag = hmac_sha256 (hmac_key, header+payload);
+	checksum = sha256 (header+payload+mac_tag);
+
+
+Generate a different `pbkdf2_salt` **everytime**.  This is CRITICAL!
+
+PBKDF2 is used after scrypt so we can re-use master key and avoid calling scrypt every time we save a database during a session.  However, we still need the encryption keys to be unique every time (ChaCha20 breaks if you re-use key+nonce pairs), so we generate a fresh pbkdf2_salt every time we encrypt and use PBKDF2 to generate fresh keys using the unique salt and `master_key`.
+
+Note that `scrypt_salt` will remain the same between saves.  It only changes if the user changes their password, at which point we generate a new `scrypt_salt` and new `master_key`.
