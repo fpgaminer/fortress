@@ -170,24 +170,32 @@ impl EntryData {
 	}
 }
 
-#[derive(Serialize, Deserialize, Default, Eq, PartialEq, Debug)]
+#[derive(Serialize, Eq, PartialEq, Debug)]
 pub struct Database {
 	pub entries: Vec<Entry>,
 	#[serde(skip_serializing, skip_deserializing)]
-	encryptor: Option<Encryptor>,
+	encryptor: Encryptor,
+}
+
+// This struct is needed because Database has a field that isn't part of
+// serialization, but can't implement Default.
+#[derive(Deserialize)]
+pub struct SerializableDatabase {
+	pub entries: Vec<Entry>,
 }
 
 impl Database {
 	pub fn new_with_password(password: &[u8]) -> Database {
-		let mut db: Database = Default::default();
 		let encryption_parameters = Default::default();
-		db.encryptor = Some(Encryptor::new(password, encryption_parameters));
-		db
+		Database {
+			entries: Default::default(),
+			encryptor: Encryptor::new(password, encryption_parameters),
+		}
 	}
 
 	pub fn change_password(&mut self, password: &[u8]) {
 		let encryption_parameters = Default::default();
-		self.encryptor = Some(Encryptor::new(password, encryption_parameters));
+		self.encryptor = Encryptor::new(password, encryption_parameters);
 	}
 
 	pub fn new_entry(&mut self) {
@@ -221,7 +229,7 @@ impl Database {
 		}
 
 		// Encrypt
-		let output = self.encryptor.as_ref().unwrap().encrypt(&payload)?;
+		let output = self.encryptor.encrypt(&payload)?;
 
 		// Write to file
 		let mut file = File::create(path)?;
@@ -234,14 +242,16 @@ impl Database {
 		let (_, encryptor, plaintext) = Encryptor::decrypt(password, &rawdata)?;
 
 		// Decompress and deserialize
-		let mut db: Database = {
+		let db: SerializableDatabase = {
 			let d = GzDecoder::new(io::Cursor::new(plaintext)).unwrap();
 			serde_json::from_reader(d).unwrap()
 		};
 
 		// Keep encryptor for quicker saving later
-		db.encryptor = Some(encryptor);
-		Ok(db)
+		Ok(Database {
+			encryptor: encryptor,
+			entries: db.entries,
+		})
 	}
 }
 
@@ -320,11 +330,11 @@ mod tests {
 	#[test]
 	fn password_change() {
 		let mut db = Database::new_with_password("password".as_bytes());
-		let old_salt = db.encryptor.as_ref().unwrap().params.salt.clone();
-		let old_master_key = db.encryptor.as_ref().unwrap().master_key.clone();
+		let old_salt = db.encryptor.params.salt.clone();
+		let old_master_key = db.encryptor.master_key.clone();
 		db.change_password("password".as_bytes());
-		assert!(db.encryptor.as_ref().unwrap().params.salt != old_salt);
-		assert!(db.encryptor.as_ref().unwrap().master_key != old_master_key);
+		assert!(db.encryptor.params.salt != old_salt);
+		assert!(db.encryptor.master_key != old_master_key);
 	}
 
 	// Make sure every encryption uses a different encryption key
@@ -350,9 +360,9 @@ mod tests {
 		let zeros = [0u8; 32];
 
 		assert!(db != db2);
-		assert!(db.encryptor.as_ref().unwrap().master_key != db2.encryptor.as_ref().unwrap().master_key);
-		assert!(db.encryptor.as_ref().unwrap().master_key != zeros);
-		assert!(db.encryptor.as_ref().unwrap().params.salt != zeros);
+		assert!(db.encryptor.master_key != db2.encryptor.master_key);
+		assert!(db.encryptor.master_key != zeros);
+		assert!(db.encryptor.params.salt != zeros);
 	}
 
 	#[test]
