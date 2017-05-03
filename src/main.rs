@@ -13,7 +13,8 @@ use rustc_serialize::hex::{ToHex, FromHex};
 use std::env;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Sender, Receiver};
-use std::io::{self, Write};
+use std::io::{self, Write, Read};
+use std::fs::File;
 
 
 macro_rules! connect {
@@ -99,7 +100,13 @@ fn main() {
 
 
 fn do_decrypt(path: &str, password: &str) {
-	let (_, _, _, payload) = Database::decrypt_payload_from_path(path, password.as_bytes()).unwrap();
+	let data = {
+		let mut data = Vec::new();
+		File::open(path).unwrap().read_to_end(&mut data).unwrap();
+		data
+	};
+
+	let (_, _, payload) = libfortress::encryption::Encryptor::decrypt(password.as_bytes(), &data).unwrap();
 	io::stdout().write(&payload).unwrap();
 }
 

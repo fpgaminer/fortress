@@ -10,23 +10,20 @@ extern crate crypto;
 extern crate byteorder;
 extern crate tempdir;
 
+pub mod encryption;
+
+use encryption::Encryptor;
 use rand::{OsRng, Rng};
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use flate2::read::GzDecoder;
-use crypto::{scrypt, chacha20, pbkdf2};
-use crypto::symmetriccipher::SynchronousStreamCipher;
-use crypto::hmac::Hmac;
-use crypto::sha2::Sha256;
-use crypto::mac::{Mac, MacResult};
-use crypto::digest::Digest;
 use std::path::Path;
 use std::fs::File;
 use std::str;
-use std::io::{BufRead, Read, Write, Cursor, self};
+use std::io::{Read, Write, self};
 use std::collections::HashSet;
 use serde::Serialize;
-use byteorder::{ReadBytesExt, WriteBytesExt, LittleEndian};
+
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug)]
 pub struct Entry {
@@ -177,26 +174,20 @@ impl EntryData {
 pub struct Database {
 	pub entries: Vec<Entry>,
 	#[serde(skip_serializing, skip_deserializing)]
-	master_key: Option<[u8; 32]>,
-	#[serde(skip_serializing, skip_deserializing)]
-	encryption_parameters: EncryptionParameters,
+	encryptor: Option<Encryptor>,
 }
 
 impl Database {
 	pub fn new_with_password(password: &[u8]) -> Database {
 		let mut db: Database = Default::default();
-		db.master_key = Some(Database::derive_master_key(password, &db.encryption_parameters));
+		let encryption_parameters = Default::default();
+		db.encryptor = Some(Encryptor::new(password, encryption_parameters));
 		db
 	}
 
 	pub fn change_password(&mut self, password: &[u8]) {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-
-		// Refresh salt
-		self.encryption_parameters.salt = rng.gen();
-
-		// Derive the new master key
-		self.master_key = Some(Database::derive_master_key(password, &self.encryption_parameters));
+		let encryption_parameters = Default::default();
+		self.encryptor = Some(Encryptor::new(password, encryption_parameters));
 	}
 
 	pub fn new_entry(&mut self) {
@@ -219,41 +210,18 @@ impl Database {
 	}
 
 	pub fn save_to_path<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
-		let mut output: Vec<u8> = Vec::new();
-
-		// Generate unique salt
-		let pbkdf2_salt: [u8; 32] = {
-			let mut rng = OsRng::new().expect("OsRng failed to initialize");
-			rng.gen()
-		};
-
-		// Derive encryption keys
-		let encryption_keys = Database::derive_encryption_keys(&self.master_key.unwrap(), &pbkdf2_salt);
-
-		// Write header
-		Database::write_header(&mut output, &self.encryption_parameters, &pbkdf2_salt)?;
-
-		// Write serialized, compressed, and encrypted database
+		// Write serialized, compressed payload
+		let mut payload: Vec<u8> = Vec::new();
 		{
-			let encrypted_writer = ChaCha20Writer::new(&mut output, &encryption_keys.chacha_key, &encryption_keys.chacha_nonce);
-			let compressed_writer = GzEncoder::new(encrypted_writer, Compression::Default);
+			let compressed_writer = GzEncoder::new(&mut payload, Compression::Default);
 			let mut json_writer = serde_json::ser::Serializer::new(compressed_writer);
 
 			self.serialize(&mut json_writer)?;
 			json_writer.into_inner().finish()?;  // TODO: Do we need to do this?  Can we just call flush?  Will the writer leaving scope force a flush?  Muh dunno...
 		}
 
-		// Write MAC tag
-		{
-			let mac_tag = hmac(&encryption_keys.hmac_key, &output);
-			output.write_all(mac_tag.code())?;
-		}
-
-		// Write checksum
-		{
-			let checksum = sha256(&output);
-			output.write_all(&checksum)?;
-		}
+		// Encrypt
+		let output = self.encryptor.as_ref().unwrap().encrypt(&payload)?;
 
 		// Write to file
 		let mut file = File::create(path)?;
@@ -261,7 +229,9 @@ impl Database {
 	}
 
 	pub fn load_from_path<P: AsRef<Path>>(path: P, password: &[u8]) -> io::Result<Database> {
-		let (_, master_key, encryption_parameters, plaintext) = Database::decrypt_payload_from_path(path, password)?;
+		let rawdata = read_file(path)?;
+
+		let (_, encryptor, plaintext) = Encryptor::decrypt(password, &rawdata)?;
 
 		// Decompress and deserialize
 		let mut db: Database = {
@@ -269,237 +239,10 @@ impl Database {
 			serde_json::from_reader(d).unwrap()
 		};
 
-		// Save master key and encryption parameters for quicker saving
-		db.master_key = Some(master_key);
-		db.encryption_parameters = encryption_parameters;
+		// Keep encryptor for quicker saving later
+		db.encryptor = Some(encryptor);
 		Ok(db)
 	}
-
-
-	// Read and decrypt the payload from the given path
-	// Returns version, master_key, encryption_parameters, and plaintext
-	pub fn decrypt_payload_from_path<P: AsRef<Path>>(path: P, password: &[u8]) -> io::Result<(u32, [u8; 32], EncryptionParameters, Vec<u8>)> {
-		// Read file
-		let rawdata = read_file(path)?;
-
-		// Verify checksum
-		let header_and_payload = Database::verify_checksum(&rawdata)?;
-
-		// Read header, which includes KDF and encryption parameters
-		let (encryption_parameters, pbkdf2_salt, ciphertext_and_mactag) = Database::read_header(header_and_payload)?;
-
-		// Derive master key from password and database parameters
-		let master_key = Database::derive_master_key(password, &encryption_parameters);
-
-		// Derive encryption keys
-		let encryption_keys = Database::derive_encryption_keys(&master_key, &pbkdf2_salt);
-
-		// Verify mac tag
-		let ciphertext = Database::verify_mac(header_and_payload, ciphertext_and_mactag, &encryption_keys)?;
-
-		// Decrypt
-		let plaintext = Database::decrypt(&encryption_keys, ciphertext);
-
-		Ok((1, master_key, encryption_parameters, plaintext))
-	}
-
-	// Given rawdata, which should be data+sha256checksum, this function
-	// checks the checksum and then returns a reference to just data.
-	fn verify_checksum(rawdata: &[u8]) -> io::Result<&[u8]> {
-		if rawdata.len() < 32 {
-			return Err(io::Error::new(io::ErrorKind::Other, "corrupt database, missing checksum"));
-		}
-
-		let data = &rawdata[..rawdata.len()-32];
-		let checksum = &rawdata[rawdata.len()-32..];
-		let calculated_checksum = sha256(data);
-			
-		if checksum != calculated_checksum {
-			return Err(io::Error::new(io::ErrorKind::Other, "corrupt database, failed checksum"));
-		}
-
-		Ok(data)
-	}
-
-	// Read an encrypted database's header.
-	// Returns the encryption parameters, pbkdf2_salt, and a reference to the ciphertext+mactag.
-	fn read_header(data: &[u8]) -> io::Result<(EncryptionParameters,[u8;32],&[u8])> {
-		let mut cursor = Cursor::new(data);
-		let mut header_string = Vec::new();
-
-		cursor.read_until(0, &mut header_string)?;
-
-		// Only v1, scrypt-chacha20 is supported
-		if str::from_utf8(&header_string).unwrap() != "fortress1-scrypt-chacha20\0" {
-			return Err(io::Error::new(io::ErrorKind::Other, "unsupported encryption"));
-		}
-
-		let log_n = cursor.read_u8()?;
-		let r = cursor.read_u32::<LittleEndian>()?;
-		let p = cursor.read_u32::<LittleEndian>()?;
-		let mut scrypt_salt = [0u8; 32];
-		cursor.read_exact(&mut scrypt_salt)?;
-		let mut pbkdf2_salt = [0u8; 32];
-		cursor.read_exact(&mut pbkdf2_salt)?;
-
-		let data_begin = cursor.position() as usize;
-
-		Ok((EncryptionParameters {
-			log_n: log_n,
-			r: r,
-			p: p,
-			salt: scrypt_salt
-		}, pbkdf2_salt, &cursor.into_inner()[data_begin..]))
-	}
-
-	// Derive master key from user password
-	fn derive_master_key(password: &[u8], parameters: &EncryptionParameters) -> [u8; 32] {
-		let mut master_key = [0u8; 32];
-		let scrypt_params = scrypt::ScryptParams::new(parameters.log_n, parameters.r, parameters.p);
-		scrypt::scrypt(password, &parameters.salt, &scrypt_params, &mut master_key);
-		master_key
-	}
-
-	fn derive_encryption_keys(master_key: &[u8;32], salt: &[u8;32]) -> EncryptionKeys {
-		let mut encryption_keys: EncryptionKeys = Default::default();
-		let mut keying_material = [0u8; (32+8+32)];
-		let mut mac = Hmac::new(Sha256::new(), master_key);
-		pbkdf2::pbkdf2(&mut mac, salt, 1, &mut keying_material);
-
-		encryption_keys.chacha_key.copy_from_slice(&keying_material[0..32]);
-		encryption_keys.chacha_nonce.copy_from_slice(&keying_material[32..32+8]);
-		encryption_keys.hmac_key.copy_from_slice(&keying_material[32+8..32+8+32]);
-
-		encryption_keys
-	}
-
-	// Given header+ciphertext+mactag and ciphertext+mactag, verify mactag and return ciphertext
-	fn verify_mac<'a>(data: &[u8], ciphertext_and_mactag: &'a [u8], encryption_keys: &EncryptionKeys) -> io::Result<&'a [u8]> {
-		if data.len() < 32 {
-			return Err(io::Error::new(io::ErrorKind::Other, "corrupt database, missing mac tag"));
-		}
-
-		let mac_tag = MacResult::new(&data[data.len()-32..]);
-		let calculated_mac = hmac(&encryption_keys.hmac_key, &data[..data.len()-32]);
-
-		if mac_tag != calculated_mac {
-			return Err(io::Error::new(io::ErrorKind::Other, "incorrect password or corrupt database"));
-		}
-
-		Ok(&ciphertext_and_mactag[..ciphertext_and_mactag.len()-32])
-	}
-
-	fn decrypt(encryption_keys: &EncryptionKeys, ciphertext: &[u8]) -> Vec<u8> {
-		let mut plaintext = vec![0u8; ciphertext.len()];
-		let mut chacha = chacha20::ChaCha20::new(&encryption_keys.chacha_key, &encryption_keys.chacha_nonce);
-		chacha.process(ciphertext, &mut plaintext);
-		plaintext
-	}
-
-	fn write_header<W: Write>(writer: &mut W, encryption_parameters: &EncryptionParameters, pbkdf2_salt: &[u8; 32]) -> io::Result<()> {
-		writer.write_all(b"fortress1-scrypt-chacha20\0")?;
-		writer.write_u8(encryption_parameters.log_n)?;
-		writer.write_u32::<LittleEndian>(encryption_parameters.r)?;
-		writer.write_u32::<LittleEndian>(encryption_parameters.p)?;
-		writer.write_all(&encryption_parameters.salt)?;
-		writer.write_all(pbkdf2_salt)?;
-		Ok(())
-	}
-}
-
-#[derive(Eq, PartialEq, Debug)]
-pub struct EncryptionParameters {
-	// Parameters for deriving master_key using scrypt
-	pub log_n: u8,
-	pub r: u32,
-	pub p: u32,
-	pub salt: [u8; 32],
-}
-
-// Default is N=18, r=8, p=1 (less N when in debug mode)
-// Some sites suggested 16 for modern systems, but I didn't see measurable benefit on my development machine.
-impl Default for EncryptionParameters {
-	#[cfg(debug_assertions)]
-	fn default() -> EncryptionParameters {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-
-		EncryptionParameters {
-			log_n: 8,
-			r: 8, 
-			p: 1,
-			salt: rng.gen(),
-		}
-	}
-	#[cfg(not(debug_assertions))]
-	fn default() -> EncryptionParameters {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-
-		EncryptionParameters {
-			log_n: 18,
-			r: 8,
-			p: 1,
-			salt: rng.gen(),
-		}
-	}
-}
-
-#[derive(Default)]
-struct EncryptionKeys {
-	pub chacha_key: [u8; 32],
-	pub chacha_nonce: [u8; 8],
-	pub hmac_key: [u8; 32],
-}
-
-struct ChaCha20Writer<W> {
-	chacha: chacha20::ChaCha20,
-	writer: W,
-	buffer: Vec<u8>,
-}
-
-impl<W> ChaCha20Writer<W>
-where
-	W: io::Write,
-{
-	pub fn new(writer: W, key: &[u8], nonce: &[u8]) -> Self {
-		ChaCha20Writer {
-			chacha: chacha20::ChaCha20::new(key, nonce),
-			writer: writer,
-			buffer: Vec::new(),
-		}
-	}
-}
-
-impl<W> Write for ChaCha20Writer<W>
-where
-	W: io::Write,
-{
-	fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-		// TODO: The way this is implemented is ... garbage.
-		// We should just re-implement most of the pieces we used from rust-crypto and add nicer
-		// interfaces.
-		self.buffer.resize(buf.len(), 0);
-		self.chacha.process(buf, &mut self.buffer);
-		self.writer.write(&self.buffer)
-	}
-
-	fn flush(&mut self) -> io::Result<()> {
-		self.writer.flush()
-	}
-}
-
-fn sha256(input: &[u8]) -> [u8; 32] {
-	let mut hash = [0u8; 32];
-	let mut hasher = Sha256::new();
-	hasher.input(input);
-	hasher.result(&mut hash);
-	hash
-}
-
-
-fn hmac(key: &[u8], input: &[u8]) -> MacResult {
-	let mut hmac = Hmac::new(Sha256::new(), key);
-	hmac.input(input);
-	hmac.result()
 }
 
 
@@ -577,11 +320,11 @@ mod tests {
 	#[test]
 	fn password_change() {
 		let mut db = Database::new_with_password("password".as_bytes());
-		let old_salt = db.encryption_parameters.salt;
-		let old_master_key = db.master_key.unwrap();
+		let old_salt = db.encryptor.as_ref().unwrap().params.salt.clone();
+		let old_master_key = db.encryptor.as_ref().unwrap().master_key.clone();
 		db.change_password("password".as_bytes());
-		assert!(db.encryption_parameters.salt != old_salt);
-		assert!(db.master_key.unwrap() != old_master_key);
+		assert!(db.encryptor.as_ref().unwrap().params.salt != old_salt);
+		assert!(db.encryptor.as_ref().unwrap().master_key != old_master_key);
 	}
 
 	// Make sure every encryption uses a different encryption key
@@ -607,9 +350,9 @@ mod tests {
 		let zeros = [0u8; 32];
 
 		assert!(db != db2);
-		assert!(db.master_key.unwrap() != db2.master_key.unwrap());
-		assert!(db.master_key.unwrap() != zeros);
-		assert!(db.encryption_parameters.salt != zeros);
+		assert!(db.encryptor.as_ref().unwrap().master_key != db2.encryptor.as_ref().unwrap().master_key);
+		assert!(db.encryptor.as_ref().unwrap().master_key != zeros);
+		assert!(db.encryptor.as_ref().unwrap().params.salt != zeros);
 	}
 
 	#[test]
