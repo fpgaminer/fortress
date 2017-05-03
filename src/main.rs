@@ -1,10 +1,10 @@
-extern crate fortress;
+extern crate libfortress;
 extern crate gtk;
 extern crate rustc_serialize;
 #[macro_use]
 extern crate clap;
 
-use fortress::{Database};
+use libfortress::{Database};
 use gtk::prelude::*;
 use gtk::{CellRendererText, ListStore, TreeView, TreeViewColumn};
 use std::rc::Rc;
@@ -99,7 +99,7 @@ fn main() {
 
 
 fn do_decrypt(path: &str, password: &str) {
-	let (_, _, _, payload) = fortress::Database::decrypt_payload_from_path(path, password.as_bytes()).unwrap();
+	let (_, _, _, payload) = Database::decrypt_payload_from_path(path, password.as_bytes()).unwrap();
 	io::stdout().write(&payload).unwrap();
 }
 
@@ -190,7 +190,7 @@ enum AppState {
 
 struct App {
 	state: AppState,
-	database: Option<fortress::Database>,
+	database: Option<Database>,
 	database_path: Option<PathBuf>,
 	current_entry_id: Vec<u8>,
 	ui: UiReferences,
@@ -357,7 +357,7 @@ impl App {
 
 	fn entry_save_clicked(&mut self) {
 		let notes_buffer = self.ui.entry_notes.get_buffer().unwrap();
-		let entry_data = fortress::EntryData::new(
+		let entry_data = libfortress::EntryData::new(
 			&self.ui.entry_title.get_text().unwrap(),
 			&self.ui.entry_username.get_text().unwrap(),
 			&self.ui.entry_password.get_text().unwrap(),
@@ -367,7 +367,7 @@ impl App {
 
 		if self.current_entry_id.len() == 0 {
 			// New entry
-			let mut entry = fortress::Entry::new();
+			let mut entry = libfortress::Entry::new();
 			entry.edit(&entry_data);
 			self.current_entry_id.clear();
 			self.current_entry_id.extend_from_slice(&entry.id);
@@ -390,7 +390,7 @@ impl App {
 
 		match self.state {
 			AppState::OpenDatabasePassword => {
-				self.database = Some(fortress::Database::load_from_path(self.database_path.as_ref().unwrap(), password.as_bytes()).unwrap());
+				self.database = Some(libfortress::Database::load_from_path(self.database_path.as_ref().unwrap(), password.as_bytes()).unwrap());
 
 				self.state = AppState::ViewDatabase;
 				self.update();
@@ -411,7 +411,7 @@ impl App {
 				if response == ok {
 					if let Some(file) = dialog.get_filename() {
 						let path = PathBuf::from(file);
-						let database = fortress::Database::new_with_password(password.as_bytes());
+						let database = libfortress::Database::new_with_password(password.as_bytes());
 						database.save_to_path(&path).unwrap();
 						self.database = Some(database);
 						self.database_path = Some(path);
@@ -508,7 +508,7 @@ impl App {
 			return;
 		}
 
-		self.entry_password = fortress::random_string(num_chars as usize, uppercase_letters, lowercase_letters, numbers, &other_chars);
+		self.entry_password = libfortress::random_string(num_chars as usize, uppercase_letters, lowercase_letters, numbers, &other_chars);
 		self.state = AppState::EditEntry;
 		self.update();
 	}
