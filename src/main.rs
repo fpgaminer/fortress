@@ -66,16 +66,28 @@ fn main() {
 		.setting(clap::AppSettings::ColoredHelp)
 		.setting(clap::AppSettings::UnifiedHelpMessage)
 		.args_from_usage(
-			"--decrypt               'Just decrypt the specified database, writing the payload to stdout'
+			"--encrypt               'Just encrypt the specified payload, writing to stdout'
+			 --decrypt               'Just decrypt the specified database, writing to stdout'
 			 --password=[PASSWORD]   'Password to use for --decrypt'
 			 [DATABASE]              'Fortress file to open'")
+		.group(clap::ArgGroup::with_name("crypt")
+			.args(&["encrypt", "decrypt"])
+			.requires_all(&["password", "DATABASE"]))
 		.get_matches();
 
 	if matches.is_present("decrypt") {
-		let password = matches.value_of("password").expect("Missing password argument");
-		let path = matches.value_of("DATABASE").expect("Missing database file");
+		let password = matches.value_of("password").unwrap();
+		let path = matches.value_of("DATABASE").unwrap();
 
 		do_decrypt(path, password);
+		return;
+	}
+
+	if matches.is_present("encrypt") {
+		let password = matches.value_of("password").unwrap();
+		let path = matches.value_of("DATABASE").unwrap();
+
+		do_encrypt(path, password);
 		return;
 	}
 
@@ -108,6 +120,21 @@ fn do_decrypt(path: &str, password: &str) {
 
 	let (_, _, payload) = libfortress::encryption::Encryptor::decrypt(password.as_bytes(), &data).unwrap();
 	io::stdout().write(&payload).unwrap();
+}
+
+
+fn do_encrypt(path: &str, password: &str) {
+	let data = {
+		let mut data = Vec::new();
+		File::open(path).unwrap().read_to_end(&mut data).unwrap();
+		data
+	};
+
+	let encryption_parameters = Default::default();
+	let encryptor = libfortress::encryption::Encryptor::new(password.as_bytes(), encryption_parameters);
+
+	let result = encryptor.encrypt(&data).unwrap();
+	io::stdout().write(&result).unwrap();
 }
 
 
