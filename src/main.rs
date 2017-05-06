@@ -138,7 +138,7 @@ fn do_encrypt(path: &str, password: &str) {
 }
 
 
-fn create_and_fill_model (database: &Database) -> ListStore {
+fn create_and_fill_model (database: &Database) -> gtk::TreeModelFilter {
 	let model = ListStore::new(&[String::static_type(), String::static_type()]);
 
 	for entry in &database.entries {
@@ -147,7 +147,7 @@ fn create_and_fill_model (database: &Database) -> ListStore {
 		model.insert_with_values (None, &[0, 1], &[&hexid, &entry_data.get_title()]);
 	}
 
-	model
+	gtk::TreeModelFilter::new(&model, None)
 }
 
 
@@ -185,6 +185,7 @@ builder_ui!(UiReferences;
 	tree: gtk::TreeView,
 	database_btn_menu: gtk::Button,
 	database_btn_new_entry: gtk::Button,
+	database_entry_search: gtk::Entry,
 
 	stack_entry: gtk::Widget,
 	entry_title: gtk::Entry,
@@ -234,6 +235,9 @@ struct App {
 	entry_password: String,
 	entry_url: String,
 	entry_notes: String,
+
+	database_search: Rc<RefCell<String>>,
+	database_model: Option<gtk::TreeModelFilter>,
 }
 
 impl App {
@@ -276,6 +280,9 @@ impl App {
 			entry_password: String::new(),
 			entry_url: String::new(),
 			entry_notes: String::new(),
+
+			database_search: Rc::new(RefCell::new(String::new())),
+			database_model: None,
 		}
 	}
 
@@ -307,8 +314,24 @@ impl App {
 		self.ui.entry_notes.get_buffer().unwrap().set_text(&self.entry_notes);
 
 		// TODO: Be more efficient here
-		let model = self.database.as_ref().map(|db| create_and_fill_model(db));
+		let model = self.database.as_ref().map(|db| {
+			let model = create_and_fill_model(db);
+			let search_string = self.database_search.clone();
+
+			model.set_visible_func(move |model,iter| {
+				let title = model.get_value(&iter, 1).get::<String>().unwrap().to_lowercase();
+				let search_string = &*search_string.borrow().to_lowercase();
+
+				if search_string != "" {
+					title.contains(search_string)
+				} else {
+					true
+				}
+			});
+			model
+		});
 		self.ui.tree.set_model(model.as_ref());
+		self.database_model = model;
 	}
 
 	fn connect_events(&self, master: &EventMaster<Self>) {
@@ -324,6 +347,7 @@ impl App {
 		connect!(master, self.ui.tree.get_selection(), connect_changed, on_cursor_changed);
 		connect!(master, self.ui.database_btn_menu, connect_clicked, database_menu_clicked);
 		connect!(master, self.ui.database_btn_new_entry, connect_clicked, database_new_entry_clicked);
+		connect!(master, self.ui.database_entry_search, connect_changed, database_search_changed);
 
 		// Entry View
 		connect!(master, self.ui.entry_btn_save, connect_clicked, entry_save_clicked);
@@ -566,5 +590,13 @@ impl App {
 	fn entry_notes_changed(&mut self) {
 		let notes_buffer = self.ui.entry_notes.get_buffer().unwrap();
 		self.entry_notes = notes_buffer.get_text(&notes_buffer.get_start_iter(), &notes_buffer.get_end_iter(), false).unwrap();
+	}
+
+	fn database_search_changed(&mut self) {
+		*self.database_search.borrow_mut() = self.ui.database_entry_search.get_text().unwrap();
+
+		if let Some(ref model) = self.database_model {
+			model.refilter();
+		}
 	}
 }
