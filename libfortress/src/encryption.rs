@@ -1,13 +1,13 @@
+use byteorder::{ReadBytesExt, WriteBytesExt, LittleEndian};
+use crypto::{scrypt, chacha20, pbkdf2};
+use crypto::digest::Digest;
+use crypto::hmac::Hmac;
+use crypto::mac::{Mac, MacResult};
+use crypto::sha2::Sha256;
+use crypto::symmetriccipher::SynchronousStreamCipher;
+use rand::{OsRng, Rng};
 use std::io::{self, Cursor, Write, BufRead, Read};
 use std::str;
-use rand::{OsRng, Rng};
-use crypto::{scrypt, chacha20, pbkdf2};
-use crypto::symmetriccipher::SynchronousStreamCipher;
-use crypto::hmac::Hmac;
-use crypto::sha2::Sha256;
-use crypto::mac::{Mac, MacResult};
-use crypto::digest::Digest;
-use byteorder::{ReadBytesExt, WriteBytesExt, LittleEndian};
 
 
 #[derive(Eq, PartialEq, Debug)]
@@ -24,7 +24,7 @@ impl Encryptor {
 		}
 	}
 
-	pub fn decrypt(password: &[u8], rawdata: &[u8]) -> io::Result<(u32,Encryptor,Vec<u8>)> {
+	pub fn decrypt(password: &[u8], rawdata: &[u8]) -> io::Result<(u32, Encryptor, Vec<u8>)> {
 		// Verify checksum
 		let header_and_payload = verify_checksum(&rawdata)?;
 
@@ -79,15 +79,15 @@ impl Encryptor {
 		Ok(output)
 	}
 
-	fn derive_encryption_keys(&self, salt: [u8;32]) -> EncryptionKeys {
+	fn derive_encryption_keys(&self, salt: [u8; 32]) -> EncryptionKeys {
 		let mut encryption_keys: EncryptionKeys = Default::default();
-		let mut keying_material = [0u8; (32+8+32)];
+		let mut keying_material = [0u8; (32 + 8 + 32)];
 		let mut mac = Hmac::new(Sha256::new(), &self.master_key);
 		pbkdf2::pbkdf2(&mut mac, &salt, 1, &mut keying_material);
 
 		encryption_keys.chacha_key.copy_from_slice(&keying_material[0..32]);
-		encryption_keys.chacha_nonce.copy_from_slice(&keying_material[32..32+8]);
-		encryption_keys.hmac_key.copy_from_slice(&keying_material[32+8..32+8+32]);
+		encryption_keys.chacha_nonce.copy_from_slice(&keying_material[32..32 + 8]);
+		encryption_keys.hmac_key.copy_from_slice(&keying_material[32 + 8..32 + 8 + 32]);
 
 		encryption_keys
 	}
@@ -111,10 +111,10 @@ fn verify_checksum(rawdata: &[u8]) -> io::Result<&[u8]> {
 		return Err(io::Error::new(io::ErrorKind::Other, "corrupt database, missing checksum"));
 	}
 
-	let data = &rawdata[..rawdata.len()-32];
-	let checksum = &rawdata[rawdata.len()-32..];
+	let data = &rawdata[..rawdata.len() - 32];
+	let checksum = &rawdata[rawdata.len() - 32..];
 	let calculated_checksum = sha256(data);
-		
+
 	if checksum != calculated_checksum {
 		return Err(io::Error::new(io::ErrorKind::Other, "corrupt database, failed checksum"));
 	}
@@ -129,19 +129,19 @@ fn verify_mac<'a>(encryption_keys: &EncryptionKeys, data: &[u8], ciphertext_and_
 		return Err(io::Error::new(io::ErrorKind::Other, "corrupt database, missing mac tag"));
 	}
 
-	let mac_tag = MacResult::new(&data[data.len()-32..]);
-	let calculated_mac = encryption_keys.hmac(&data[..data.len()-32]);
+	let mac_tag = MacResult::new(&data[data.len() - 32..]);
+	let calculated_mac = encryption_keys.hmac(&data[..data.len() - 32]);
 
 	if mac_tag != calculated_mac {
 		return Err(io::Error::new(io::ErrorKind::Other, "incorrect password or corrupt database"));
 	}
 
-	Ok(&ciphertext_and_mactag[..ciphertext_and_mactag.len()-32])
+	Ok(&ciphertext_and_mactag[..ciphertext_and_mactag.len() - 32])
 }
 
 // Read an encrypted database's header.
 // Returns the encryption parameters, pbkdf2_salt, and a reference to the ciphertext+mactag.
-fn read_header(data: &[u8]) -> io::Result<(EncryptionParameters,[u8;32],&[u8])> {
+fn read_header(data: &[u8]) -> io::Result<(EncryptionParameters, [u8; 32], &[u8])> {
 	let mut cursor = Cursor::new(data);
 	let mut header_string = Vec::new();
 
@@ -162,12 +162,16 @@ fn read_header(data: &[u8]) -> io::Result<(EncryptionParameters,[u8;32],&[u8])> 
 
 	let data_begin = cursor.position() as usize;
 
-	Ok((EncryptionParameters {
-		log_n: log_n,
-		r: r,
-		p: p,
-		salt: scrypt_salt
-	}, pbkdf2_salt, &cursor.into_inner()[data_begin..]))
+	Ok(
+		(EncryptionParameters {
+			log_n: log_n,
+			r: r,
+			p: p,
+			salt: scrypt_salt
+		},
+		pbkdf2_salt,
+		&cursor.into_inner()[data_begin..])
+	)
 }
 
 
@@ -199,7 +203,7 @@ impl Default for EncryptionParameters {
 
 		EncryptionParameters {
 			log_n: 8,
-			r: 8, 
+			r: 8,
 			p: 1,
 			salt: rng.gen(),
 		}

@@ -13,16 +13,16 @@ extern crate tempdir;
 pub mod encryption;
 
 use encryption::Encryptor;
-use rand::{OsRng, Rng};
 use flate2::Compression;
-use flate2::write::GzEncoder;
 use flate2::read::GzDecoder;
-use std::path::Path;
-use std::fs::File;
-use std::str;
-use std::io::{Read, Write, self};
-use std::collections::HashSet;
+use flate2::write::GzEncoder;
+use rand::{OsRng, Rng};
 use serde::Serialize;
+use std::collections::HashSet;
+use std::fs::File;
+use std::io::{self, Read, Write};
+use std::path::Path;
+use std::str;
 
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug)]
@@ -63,8 +63,8 @@ impl Default for Entry {
 }
 
 mod id_format {
-	use serde::{self, Deserialize, Serializer, Deserializer};
 	use data_encoding::HEXLOWER_PERMISSIVE;
+	use serde::{self, Deserialize, Serializer, Deserializer};
 
 	pub fn serialize<S>(id: &[u8], serializer: S) -> Result<S::Ok, S::Error>
 		where S: Serializer
@@ -225,7 +225,7 @@ impl Database {
 			let mut json_writer = serde_json::ser::Serializer::new(compressed_writer);
 
 			self.serialize(&mut json_writer)?;
-			json_writer.into_inner().finish()?;  // TODO: Do we need to do this?  Can we just call flush?  Will the writer leaving scope force a flush?  Muh dunno...
+			json_writer.into_inner().finish()?; // TODO: Do we need to do this?  Can we just call flush?  Will the writer leaving scope force a flush?  Muh dunno...
 		}
 
 		// Encrypt
@@ -303,11 +303,11 @@ pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: b
 
 #[cfg(test)]
 mod tests {
+	use super::{Database, read_file, random_string, Entry, EntryData};
 	use rand::{OsRng, Rng};
 	use rand::chacha::ChaChaRng;
-	use tempdir::TempDir;
-	use super::{Database, read_file, random_string, Entry, EntryData};
 	use std::collections::HashMap;
+	use tempdir::TempDir;
 
 	#[test]
 	fn encrypt_then_decrypt() {
@@ -400,7 +400,7 @@ mod tests {
 
 		let mut chi_squared = 0.0;
 		let e = string.len() as f64 / 63.0;
-		
+
 		for (_, o) in &bins {
 			chi_squared += ((*o as f64 - e) * (*o as f64 - e)) / e;
 		}
@@ -482,22 +482,22 @@ mod tests {
 
 			for j in 0..number_of_edits {
 				let history = &entry.history[j];
-				assert!(history.get_title() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
-				assert!(history.get_username() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
-				assert!(history.get_password() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
-				assert!(history.get_url() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
-				assert!(history.get_notes() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
+				assert!(history.get_title() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
+				assert!(history.get_username() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
+				assert!(history.get_password() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
+				assert!(history.get_url() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
+				assert!(history.get_notes() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
 			}
 		}
 
 		let entry = rng.choose(&db3.entries).unwrap();
 		let latest = entry.read_latest().unwrap();
 
-		assert!(latest.get_title() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
-		assert!(latest.get_username() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
-		assert!(latest.get_password() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
-		assert!(latest.get_url() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
-		assert!(latest.get_notes() == rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>());
+		assert!(latest.get_title() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
+		assert!(latest.get_username() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
+		assert!(latest.get_password() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
+		assert!(latest.get_url() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
+		assert!(latest.get_notes() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
 	}
 
 	// TODO: Test all the failure modes of opening a database
