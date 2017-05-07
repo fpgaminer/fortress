@@ -4,17 +4,17 @@ extern crate data_encoding;
 #[macro_use]
 extern crate clap;
 
-use libfortress::Database;
-use gtk::prelude::*;
-use gtk::{CellRendererText, ListStore, TreeView, TreeViewColumn};
-use std::rc::Rc;
-use std::cell::RefCell;
 use data_encoding::HEXLOWER_PERMISSIVE;
+use gtk::{CellRendererText, ListStore, TreeView, TreeViewColumn};
+use gtk::prelude::*;
+use libfortress::Database;
+use std::cell::RefCell;
 use std::env;
-use std::path::PathBuf;
-use std::sync::mpsc::{channel, Sender, Receiver};
-use std::io::{self, Write, Read};
 use std::fs::File;
+use std::io::{self, Write, Read};
+use std::path::PathBuf;
+use std::rc::Rc;
+use std::sync::mpsc::{channel, Sender, Receiver};
 
 
 macro_rules! connect {
