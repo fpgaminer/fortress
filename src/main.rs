@@ -4,7 +4,7 @@ extern crate data_encoding;
 #[macro_use]
 extern crate clap;
 
-use libfortress::{Database};
+use libfortress::Database;
 use gtk::prelude::*;
 use gtk::{CellRendererText, ListStore, TreeView, TreeViewColumn};
 use std::rc::Rc;
@@ -50,7 +50,9 @@ macro_rules! builder_ui {
 			fn from_builder(builder: &gtk::Builder) -> Self {
 				Self {
 					$(
-						$name: builder.get_object(stringify!($name)).expect(concat!("Glade missing ", stringify!($name))),
+						$name: builder.get_object(stringify!($name)).expect(
+							concat!("Glade missing ", stringify!($name))
+						),
 					)*
 				}
 			}
@@ -67,12 +69,11 @@ fn main() {
 		.setting(clap::AppSettings::UnifiedHelpMessage)
 		.args_from_usage(
 			"--encrypt               'Just encrypt the specified payload, writing to stdout'
-			 --decrypt               'Just decrypt the specified database, writing to stdout'
-			 --password=[PASSWORD]   'Password to use for --decrypt'
-			 [DATABASE]              'Fortress file to open'")
-		.group(clap::ArgGroup::with_name("crypt")
-			.args(&["encrypt", "decrypt"])
-			.requires_all(&["password", "DATABASE"]))
+		     --decrypt               'Just decrypt the specified database, writing to stdout'
+		     --password=[PASSWORD]   'Password to use for --decrypt'
+		     [DATABASE]              'Fortress file to open'"
+		)
+		.group(clap::ArgGroup::with_name("crypt").args(&["encrypt", "decrypt"]).requires_all(&["password", "DATABASE"]))
 		.get_matches();
 
 	if matches.is_present("decrypt") {
@@ -93,9 +94,9 @@ fn main() {
 
 	// Initialize GTK
 	if gtk::init().is_err() {
-        println!("Failed to initialize GTK.");
-        return;
-    }
+		println!("Failed to initialize GTK.");
+		return;
+	}
 
 	let app = App::new();
 	let (tx, rx) = channel::<fn(&mut App)>();
@@ -138,27 +139,27 @@ fn do_encrypt(path: &str, password: &str) {
 }
 
 
-fn create_and_fill_model (database: &Database) -> gtk::TreeModelFilter {
+fn create_and_fill_model(database: &Database) -> gtk::TreeModelFilter {
 	let model = ListStore::new(&[String::static_type(), String::static_type()]);
 
 	for entry in &database.entries {
 		let hexid = HEXLOWER_PERMISSIVE.encode(&entry.id);
 		let entry_data = entry.history.last().unwrap();
-		model.insert_with_values (None, &[0, 1], &[&hexid, &entry_data.get_title()]);
+		model.insert_with_values(None, &[0, 1], &[&hexid, &entry_data.get_title()]);
 	}
 
 	gtk::TreeModelFilter::new(&model, None)
 }
 
 
-fn append_column (tree: &TreeView, id: i32) {
+fn append_column(tree: &TreeView, id: i32) {
 	let column = TreeViewColumn::new();
 	let cell = CellRendererText::new();
 
-    column.pack_start(&cell, true);
-    column.add_attribute(&cell, "text", id);
-	column.set_resizable (true);
-    tree.append_column(&column);
+	column.pack_start(&cell, true);
+	column.add_attribute(&cell, "text", id);
+	column.set_resizable(true);
+	tree.append_column(&column);
 }
 
 
@@ -261,8 +262,7 @@ impl App {
 
 		if database_path.is_some() {
 			ui.stack.set_visible_child(&ui.stack_child_password);
-		}
-		else {
+		} else {
 			ui.stack.set_visible_child(&ui.stack_child_intro);
 		}
 
@@ -274,7 +274,7 @@ impl App {
 			database_path: database_path,
 			current_entry_id: Vec::new(),
 			ui: ui,
-			
+
 			entry_title: String::new(),
 			entry_username: String::new(),
 			entry_password: String::new(),
@@ -362,7 +362,7 @@ impl App {
 		// Menu
 		connect!(master, self.ui.menu_btn_close, connect_clicked, menu_close_clicked);
 		connect!(master, self.ui.menu_btn_change_password, connect_clicked, menu_change_password_clicked);
-		
+
 		// Generate View
 		connect!(master, self.ui.generate_btn_generate, connect_clicked, generate_btn_clicked);
 	}
@@ -430,8 +430,7 @@ impl App {
 			self.current_entry_id.clear();
 			self.current_entry_id.extend_from_slice(&entry.id);
 			self.database.as_mut().unwrap().add_entry(entry);
-		}
-		else {
+		} else {
 			// Edit entry
 			let mut entry = self.database.as_mut().unwrap().get_entry_by_id(&self.current_entry_id).unwrap();
 			entry.edit(&entry_data);
@@ -465,7 +464,7 @@ impl App {
 				dialog.set_select_multiple(false);
 				let response = dialog.run();
 				let ok: i32 = gtk::ResponseType::Ok.into();
-			
+
 				if response == ok {
 					if let Some(file) = dialog.get_filename() {
 						let path = PathBuf::from(file);
@@ -476,13 +475,11 @@ impl App {
 
 						self.state = AppState::ViewDatabase;
 						self.update();
-					}
-					else {
+					} else {
 						self.state = AppState::Intro;
 						self.update();
 					}
-				}
-				else {
+				} else {
 					self.state = AppState::Intro;
 					self.update();
 				}
@@ -511,7 +508,7 @@ impl App {
 		dialog.set_select_multiple(false);
 		let response = dialog.run();
 		let ok: i32 = gtk::ResponseType::Ok.into();
-		
+
 		if response == ok {
 			if let Some(file) = dialog.get_filename() {
 				self.database_path = Some(PathBuf::from(file));
