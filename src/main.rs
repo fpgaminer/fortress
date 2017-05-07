@@ -1,6 +1,6 @@
 extern crate libfortress;
 extern crate gtk;
-extern crate rustc_serialize;
+extern crate data_encoding;
 #[macro_use]
 extern crate clap;
 
@@ -9,7 +9,7 @@ use gtk::prelude::*;
 use gtk::{CellRendererText, ListStore, TreeView, TreeViewColumn};
 use std::rc::Rc;
 use std::cell::RefCell;
-use rustc_serialize::hex::{ToHex, FromHex};
+use data_encoding::HEXLOWER_PERMISSIVE;
 use std::env;
 use std::path::PathBuf;
 use std::sync::mpsc::{channel, Sender, Receiver};
@@ -142,7 +142,7 @@ fn create_and_fill_model (database: &Database) -> gtk::TreeModelFilter {
 	let model = ListStore::new(&[String::static_type(), String::static_type()]);
 
 	for entry in &database.entries {
-		let hexid = entry.id.to_hex();
+		let hexid = HEXLOWER_PERMISSIVE.encode(&entry.id);
 		let entry_data = entry.history.last().unwrap();
 		model.insert_with_values (None, &[0, 1], &[&hexid, &entry_data.get_title()]);
 	}
@@ -382,7 +382,7 @@ impl App {
 			if let Some(ref mut database) = self.database {
 				let hexid = model.get_value(&iter, 0).get::<String>().unwrap();
 				self.current_entry_id.clear();
-				self.current_entry_id.append(&mut hexid.from_hex().unwrap());
+				self.current_entry_id.append(&mut HEXLOWER_PERMISSIVE.decode(hexid.as_bytes()).unwrap());
 
 				let entry = database.get_entry_by_id(&self.current_entry_id).unwrap();
 				let entry_data = entry.history.last().unwrap();

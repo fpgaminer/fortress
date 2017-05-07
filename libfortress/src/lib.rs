@@ -4,7 +4,7 @@ extern crate time;
 extern crate serde_derive;
 extern crate serde;
 extern crate serde_json;
-extern crate rustc_serialize;
+extern crate data_encoding;
 extern crate flate2;
 extern crate crypto;
 extern crate byteorder;
@@ -64,12 +64,12 @@ impl Default for Entry {
 
 mod id_format {
 	use serde::{self, Deserialize, Serializer, Deserializer};
-	use rustc_serialize::hex::{ToHex, FromHex};
+	use data_encoding::HEXLOWER_PERMISSIVE;
 
 	pub fn serialize<S>(id: &[u8], serializer: S) -> Result<S::Ok, S::Error>
 		where S: Serializer
 	{
-		serializer.serialize_str(&id.to_hex())
+		serializer.serialize_str(&HEXLOWER_PERMISSIVE.encode(id))
 	}
 
 	pub fn deserialize<'de, D>(deserializer: D) -> Result<[u8; 32], D::Error>
@@ -77,10 +77,10 @@ mod id_format {
 	{
 		let mut bytes = [0u8; 32];
 		let s = String::deserialize(deserializer)?;
-		let x = s.from_hex().map_err(serde::de::Error::custom)?;
-		for i in 0..32 {
-			bytes[i] = x[i];
+		if HEXLOWER_PERMISSIVE.decode_len(s.len()).map_err(serde::de::Error::custom)? != 32 {
+			return Err(serde::de::Error::custom("bad length"));
 		}
+		HEXLOWER_PERMISSIVE.decode_mut(s.as_bytes(), &mut bytes).map_err(serde::de::Error::custom)?;
 		Ok(bytes)
 	}
 }
