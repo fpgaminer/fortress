@@ -257,7 +257,7 @@ impl App {
 		// Apply CSS
 		let screen = ui.window.get_screen().unwrap();
 		let provider = gtk::CssProvider::new();
-		provider.load_from_path("src/style.css").unwrap();
+		provider.load_from_data(include_str!("style.css")).unwrap();
 		gtk::StyleContext::add_provider_for_screen(&screen, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 
 		if database_path.is_some() {
