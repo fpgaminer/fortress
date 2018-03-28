@@ -432,7 +432,7 @@ impl App {
 			self.database.as_mut().unwrap().add_entry(entry);
 		} else {
 			// Edit entry
-			let mut entry = self.database.as_mut().unwrap().get_entry_by_id(&self.current_entry_id).unwrap();
+			let entry = self.database.as_mut().unwrap().get_entry_by_id(&self.current_entry_id).unwrap();
 			entry.edit(&entry_data);
 		}
 

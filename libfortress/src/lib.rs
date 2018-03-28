@@ -80,7 +80,7 @@ mod id_format {
 		if HEXLOWER_PERMISSIVE.decode_len(s.len()).map_err(serde::de::Error::custom)? != 32 {
 			return Err(serde::de::Error::custom("bad length"));
 		}
-		HEXLOWER_PERMISSIVE.decode_mut(s.as_bytes(), &mut bytes).map_err(serde::de::Error::custom)?;
+		HEXLOWER_PERMISSIVE.decode_mut(s.as_bytes(), &mut bytes).map_err(|e| serde::de::Error::custom(e.error))?;
 		Ok(bytes)
 	}
 }
@@ -177,13 +177,6 @@ pub struct Database {
 	encryptor: Encryptor,
 }
 
-// This struct is needed because Database has a field that isn't part of
-// serialization, but can't implement Default.
-#[derive(Deserialize)]
-pub struct SerializableDatabase {
-	pub entries: Vec<Entry>,
-}
-
 impl Database {
 	pub fn new_with_password(password: &[u8]) -> Database {
 		let encryption_parameters = Default::default();
@@ -237,6 +230,13 @@ impl Database {
 	}
 
 	pub fn load_from_path<P: AsRef<Path>>(path: P, password: &[u8]) -> io::Result<Database> {
+		// This struct is needed because Database has a field that isn't part of
+		// serialization, but can't implement Default.
+		#[derive(Deserialize)]
+		pub struct SerializableDatabase {
+			pub entries: Vec<Entry>,
+		}
+		
 		let rawdata = read_file(path)?;
 
 		let (_, encryptor, plaintext) = Encryptor::decrypt(password, &rawdata)?;
