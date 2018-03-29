@@ -90,7 +90,6 @@ macro_rules! newtype_traits (($newtype:ident, $len:expr) => (
 		}
 	}
 
-    // TODO: Deserialize from HEX
 	impl<'de> ::serde::Deserialize<'de> for $newtype {
 		fn deserialize<D>(deserializer: D) -> Result<$newtype, D::Error>
 			where D: ::serde::Deserializer<'de>
@@ -101,26 +100,7 @@ macro_rules! newtype_traits (($newtype:ident, $len:expr) => (
 				fn expecting(&self, formatter: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
 					write!(formatter, stringify!($newtype))
 				}
-				/*fn visit_seq<V>(self, mut visitor: V) -> Result<Self::Value, V::Error>
-					where V: ::serde::de::SeqAccess<'de>
-				{
-					let mut res = $newtype([0; $len]);
-					{
-						let $newtype(ref mut arr) = res;
-						for r in arr.iter_mut() {
-							if let Some(value) = try!(visitor.next_element()) {
-								*r = value;
-							}
-						}
-					}
-					Ok(res)
-				}
-				fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
-					where E: ::serde::de::Error
-				{
-					$newtype::from_slice(v).ok_or(::serde::de::Error::invalid_length(v.len(), &self))
-				}*/
-
+				
                 fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
                     where E: ::serde::de::Error
                 {
