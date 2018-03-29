@@ -11,6 +11,7 @@ extern crate byteorder;
 extern crate tempdir;
 
 pub mod encryption;
+#[macro_use] mod newtype_macros;
 
 use encryption::Encryptor;
 use flate2::Compression;
@@ -18,17 +19,21 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use rand::{OsRng, Rng};
 use serde::Serialize;
-use std::collections::HashSet;
+use std::collections::{HashSet, HashMap};
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::Path;
 use std::str;
 
 
+new_type!{
+	public ID(32);
+}
+
+
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug)]
 pub struct Entry {
-	#[serde(with = "id_format")]
-	pub id: [u8; 32],
+	pub id: ID,
 	pub history: Vec<EntryData>,
 }
 
@@ -59,29 +64,6 @@ impl Default for Entry {
 			id: rng.gen(),
 			history: Vec::new(),
 		}
-	}
-}
-
-mod id_format {
-	use data_encoding::HEXLOWER_PERMISSIVE;
-	use serde::{self, Deserialize, Serializer, Deserializer};
-
-	pub fn serialize<S>(id: &[u8], serializer: S) -> Result<S::Ok, S::Error>
-		where S: Serializer
-	{
-		serializer.serialize_str(&HEXLOWER_PERMISSIVE.encode(id))
-	}
-
-	pub fn deserialize<'de, D>(deserializer: D) -> Result<[u8; 32], D::Error>
-		where D: Deserializer<'de>
-	{
-		let mut bytes = [0u8; 32];
-		let s = String::deserialize(deserializer)?;
-		if HEXLOWER_PERMISSIVE.decode_len(s.len()).map_err(serde::de::Error::custom)? != 32 {
-			return Err(serde::de::Error::custom("bad length"));
-		}
-		HEXLOWER_PERMISSIVE.decode_mut(s.as_bytes(), &mut bytes).map_err(|e| serde::de::Error::custom(e.error))?;
-		Ok(bytes)
 	}
 }
 
@@ -170,9 +152,94 @@ impl EntryData {
 	}
 }
 
+// A directory is a list of references to Entries and Directories, much like a filesystem directory.
+#[derive(Serialize, Eq, PartialEq, Debug)]
+pub struct Directory {
+	pub id: ID,
+	#[serde(skip_serializing)]
+	pub entries: HashSet<ID>,
+	history: Vec<DirectoryHistory>,
+}
+
+impl Directory {
+	pub fn new() -> Directory {
+		let mut rng = OsRng::new().expect("OsRng failed to initialize");
+
+		Directory {
+			id: rng.gen(),
+			entries: HashSet::new(),
+			history: Vec::new(),
+		}
+	}
+
+	pub fn add(&mut self, id: ID) {
+		self.entries.insert(id);
+		self.history.push(DirectoryHistory {
+			id: id,
+			action: DirectoryHistoryAction::Add,
+		});
+	}
+
+	// List all Entry entries in this directory
+	pub fn list_entries<'a>(&'a self, database: &Database) -> Vec<&'a ID> {
+		self.entries.iter().filter(|id| {
+			database.get_entry_by_id(id).is_some()
+		}).collect()
+	}
+}
+
+impl<'de> serde::Deserialize<'de> for Directory {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
+		#[derive(Deserialize)]
+		struct DirectoryDeserialized {
+			id: ID,
+			history: Vec<DirectoryHistory>,
+		}
+
+		let d: DirectoryDeserialized = serde::Deserialize::deserialize(deserializer)?;
+		let mut entries = HashSet::new();
+
+		// Re-construct current state from history
+		for history in &d.history {
+			match history.action {
+				DirectoryHistoryAction::Add => entries.insert(history.id),
+				DirectoryHistoryAction::Remove => entries.remove(&history.id),
+			};
+		}
+
+		Ok(Directory {
+			id: d.id,
+			entries: entries,
+			history: d.history,
+		})
+	}
+}
+
+#[derive(Serialize, Deserialize, Eq, PartialEq, Debug)]
+pub struct DirectoryHistory {
+	pub id: ID,
+	pub action: DirectoryHistoryAction,
+}
+
+#[derive(Serialize, Deserialize, Eq, PartialEq, Debug)]
+pub enum DirectoryHistoryAction {
+	Add,
+	Remove,
+}
+
+#[derive(Serialize, Deserialize, Eq, PartialEq, Debug)]
+pub enum DatabaseObject {
+	Entry(Entry),
+	Directory(Directory),
+}
+
 #[derive(Serialize, Eq, PartialEq, Debug)]
 pub struct Database {
-	pub entries: Vec<Entry>,
+	objects: HashMap<ID, DatabaseObject>,
+	root_directory: ID,
 	#[serde(skip_serializing, skip_deserializing)]
 	encryptor: Encryptor,
 }
@@ -180,8 +247,15 @@ pub struct Database {
 impl Database {
 	pub fn new_with_password(password: &[u8]) -> Database {
 		let encryption_parameters = Default::default();
+
+		let root = Directory::new();
+		let root_directory = root.id;
+		let mut objects = HashMap::new();
+		objects.insert(root.id, DatabaseObject::Directory(root));
+
 		Database {
-			entries: Default::default(),
+			objects: objects,
+			root_directory: root_directory,
 			encryptor: Encryptor::new(password, encryption_parameters),
 		}
 	}
@@ -191,23 +265,42 @@ impl Database {
 		self.encryptor = Encryptor::new(password, encryption_parameters);
 	}
 
+	pub fn get_root(&self) -> &Directory {
+		match self.objects.get(&self.root_directory).unwrap() {
+			&DatabaseObject::Directory(ref dir) => dir,
+			_ => panic!(),
+		}
+	}
+
+	pub fn get_root_mut(&mut self) -> &mut Directory {
+		match self.objects.get_mut(&self.root_directory).unwrap() {
+			&mut DatabaseObject::Directory(ref mut dir) => dir,
+			_ => panic!(),
+		}
+	}
+
 	pub fn new_entry(&mut self) {
 		let entry = Entry::new();
-		self.entries.push(entry);
+		self.add_entry(entry);
 	}
 
 	pub fn add_entry(&mut self, entry: Entry) {
-		self.entries.push(entry);
+		self.get_root_mut().add(entry.id);
+		self.objects.insert(entry.id, DatabaseObject::Entry(entry));
 	}
 
-	pub fn get_entry_by_id(&mut self, id: &[u8]) -> Option<&mut Entry> {
-		for entry in &mut self.entries {
-			if entry.id == id {
-				return Some(entry);
-			}
+	pub fn get_entry_by_id(&self, id: &ID) -> Option<&Entry> {
+		match self.objects.get(id)? {
+			&DatabaseObject::Entry(ref entry) => Some(entry),
+			_ => None,
 		}
+	}
 
-		None
+	pub fn get_entry_by_id_mut(&mut self, id: &ID) -> Option<&mut Entry> {
+		match self.objects.get_mut(id)? {
+			&mut DatabaseObject::Entry(ref mut entry) => Some(entry),
+			_ => None,
+		}
 	}
 
 	pub fn save_to_path<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
@@ -233,8 +326,9 @@ impl Database {
 		// This struct is needed because Database has a field that isn't part of
 		// serialization, but can't implement Default.
 		#[derive(Deserialize)]
-		pub struct SerializableDatabase {
-			pub entries: Vec<Entry>,
+		struct SerializableDatabase {
+			objects: HashMap<ID, DatabaseObject>,
+			root_directory: ID,
 		}
 		
 		let rawdata = read_file(path)?;
@@ -250,7 +344,8 @@ impl Database {
 		// Keep encryptor for quicker saving later
 		Ok(Database {
 			encryptor: encryptor,
-			entries: db.entries,
+			objects: db.objects,
+			root_directory: db.root_directory,
 		})
 	}
 }
@@ -303,7 +398,7 @@ pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: b
 
 #[cfg(test)]
 mod tests {
-	use super::{Database, read_file, random_string, Entry, EntryData};
+	use super::{Database, read_file, random_string, Entry, EntryData, ID};
 	use rand::{OsRng, Rng};
 	use rand::chacha::ChaChaRng;
 	use std::collections::HashMap;
@@ -450,8 +545,15 @@ mod tests {
 		let mut db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), password.as_bytes()).unwrap();
 
 		// Edit
+		// NOTE: The method of using the root directory's history to select a random entry is a bit of a hack.
+		// We want something repeatable, but objects in the database get indexed using HashMap and HashSet.
+		// So we just dig through the history as a workaround for now.
 		{
-			let entry = rng.choose_mut(&mut db2.entries).unwrap();
+			let entry_id: ID = {
+				let history = rng.choose(&db2.get_root().history).unwrap();
+				history.id
+			};
+			let entry = db2.get_entry_by_id_mut(&entry_id).unwrap();
 			entry.edit(&EntryData::new(
 				&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
 				&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
@@ -477,7 +579,8 @@ mod tests {
 		let number_of_entries: usize = rng.gen_range(1, 16);
 
 		for i in 0..number_of_entries {
-			let entry = &db3.entries[i];
+			let entry_id = db3.get_root().history[i].id;
+			let entry = db3.get_entry_by_id(&entry_id).unwrap();
 			let number_of_edits: usize = rng.gen_range(0, 8);
 
 			for j in 0..number_of_edits {
@@ -490,7 +593,11 @@ mod tests {
 			}
 		}
 
-		let entry = rng.choose(&db3.entries).unwrap();
+		let entry_id: ID = {
+			let history = rng.choose(&db3.get_root().history).unwrap();
+			history.id
+		};
+		let entry = db3.get_entry_by_id(&entry_id).unwrap();
 		let latest = entry.read_latest().unwrap();
 
 		assert!(latest.get_title() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
