@@ -7,7 +7,7 @@ extern crate clap;
 use data_encoding::HEXLOWER_PERMISSIVE;
 use gtk::{CellRendererText, ListStore, TreeView, TreeViewColumn};
 use gtk::prelude::*;
-use libfortress::Database;
+use libfortress::{Database, ID};
 use std::cell::RefCell;
 use std::env;
 use std::fs::File;
@@ -142,10 +142,20 @@ fn do_encrypt(path: &str, password: &str) {
 fn create_and_fill_model(database: &Database) -> gtk::TreeModelFilter {
 	let model = ListStore::new(&[String::static_type(), String::static_type()]);
 
-	for entry in &database.entries {
-		let hexid = HEXLOWER_PERMISSIVE.encode(&entry.id);
-		let entry_data = entry.history.last().unwrap();
-		model.insert_with_values(None, &[0, 1], &[&hexid, &entry_data.get_title()]);
+	let mut entries: Vec<(ID, &str, i64)> = database.get_root().list_entries(&database).iter().map(|id| {
+		let entry = database.get_entry_by_id(id).unwrap();
+		let latest = entry.read_latest().unwrap();
+		(**id, latest.get_title(), latest.get_time_created())
+	}).collect();
+
+	// Sort by time created (and then by ID as a tie breaker)
+	entries.sort_by(|a, b| {
+		a.2.cmp(&b.2).then(a.0.cmp(&b.0))
+	});
+
+	for entry in &entries {
+		let hexid = HEXLOWER_PERMISSIVE.encode(&entry.0[..]);
+		model.insert_with_values(None, &[0, 1], &[&hexid, &entry.1]);
 	}
 
 	gtk::TreeModelFilter::new(&model, None)
@@ -228,7 +238,7 @@ struct App {
 	state: AppState,
 	database: Option<Database>,
 	database_path: Option<PathBuf>,
-	current_entry_id: Vec<u8>,
+	current_entry_id: Option<ID>,
 	ui: UiReferences,
 
 	entry_title: String,
@@ -262,17 +272,18 @@ impl App {
 
 		if database_path.is_some() {
 			ui.stack.set_visible_child(&ui.stack_child_password);
+			ui.window.set_focus(Some(&ui.open_entry_password));
 		} else {
 			ui.stack.set_visible_child(&ui.stack_child_intro);
 		}
-
 		ui.window.show_all();
 
+
 		App {
-			state: AppState::Intro,
+			state: if database_path.is_some() { AppState::OpenDatabasePassword } else { AppState::Intro },
 			database: None,
 			database_path: database_path,
-			current_entry_id: Vec::new(),
+			current_entry_id: None,
 			ui: ui,
 
 			entry_title: String::new(),
@@ -381,10 +392,9 @@ impl App {
 		if let Some((model, iter)) = selection.get_selected() {
 			if let Some(ref mut database) = self.database {
 				let hexid = model.get_value(&iter, 0).get::<String>().unwrap();
-				self.current_entry_id.clear();
-				self.current_entry_id.append(&mut HEXLOWER_PERMISSIVE.decode(hexid.as_bytes()).unwrap());
+				self.current_entry_id = Some(ID::from_slice(&mut HEXLOWER_PERMISSIVE.decode(hexid.as_bytes()).unwrap()).unwrap());
 
-				let entry = database.get_entry_by_id(&self.current_entry_id).unwrap();
+				let entry = database.get_entry_by_id(&self.current_entry_id.unwrap()).unwrap();
 				let entry_data = entry.history.last().unwrap();
 
 				self.entry_title = entry_data.get_title().to_string();
@@ -401,7 +411,7 @@ impl App {
 	}
 
 	fn database_new_entry_clicked(&mut self) {
-		self.current_entry_id.clear();
+		self.current_entry_id = None;
 
 		self.entry_title.clear();
 		self.entry_username.clear();
@@ -423,17 +433,16 @@ impl App {
 			&notes_buffer.get_text(&notes_buffer.get_start_iter(), &notes_buffer.get_end_iter(), false).unwrap(),
 		);
 
-		if self.current_entry_id.len() == 0 {
+		if let Some(entry_id) = self.current_entry_id {
+			// Edit entry
+			let entry = self.database.as_mut().unwrap().get_entry_by_id_mut(&entry_id).unwrap();
+			entry.edit(&entry_data);
+		} else {
 			// New entry
 			let mut entry = libfortress::Entry::new();
 			entry.edit(&entry_data);
-			self.current_entry_id.clear();
-			self.current_entry_id.extend_from_slice(&entry.id);
+			self.current_entry_id = Some(entry.id.clone());
 			self.database.as_mut().unwrap().add_entry(entry);
-		} else {
-			// Edit entry
-			let entry = self.database.as_mut().unwrap().get_entry_by_id(&self.current_entry_id).unwrap();
-			entry.edit(&entry_data);
 		}
 
 		self.database.as_ref().unwrap().save_to_path(self.database_path.as_ref().unwrap()).unwrap();
