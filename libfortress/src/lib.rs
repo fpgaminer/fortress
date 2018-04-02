@@ -1,3 +1,7 @@
+// TODO: Change to deterministic encryption
+// TODO: Remove compression and switch to a diff format
+// TODO: Switch to HashMap for Entries
+// TODO: Bump format version
 extern crate rand;
 extern crate time;
 #[macro_use]
@@ -31,67 +35,50 @@ new_type!{
 }
 
 
-#[derive(Serialize, Deserialize, Eq, PartialEq, Debug)]
+#[derive(Serialize, Eq, PartialEq, Debug)]
 pub struct Entry {
-	pub id: ID,
-	pub history: Vec<EntryData>,
+	id: ID,
+	history: Vec<EntryHistory>,
+	time_created: i64,
+
+	// These all represent the current state of the Entry
+	#[serde(skip_serializing, skip_deserializing)]
+	title: String,
+	#[serde(skip_serializing, skip_deserializing)]
+	username: String,
+	#[serde(skip_serializing, skip_deserializing)]
+	password: String,
+	#[serde(skip_serializing, skip_deserializing)]
+	url: String,
+	#[serde(skip_serializing, skip_deserializing)]
+	notes: String,
 }
 
 impl Entry {
 	pub fn new() -> Entry {
 		let mut rng = OsRng::new().expect("OsRng failed to initialize");
 
+		Entry::inner_new(rng.gen(), Vec::new(), time::now_utc().to_timespec().sec)
+	}
+
+	fn inner_new(id: ID, history: Vec<EntryHistory>, time_created: i64) -> Entry {
 		Entry {
-			id: rng.gen(),
-			history: Vec::new(),
+			id: id,
+			history: history,
+			time_created: time_created,
+
+			title: String::new(),
+			username: String::new(),
+			password: String::new(),
+			url: String::new(),
+			notes: String::new(),
 		}
 	}
 
-	pub fn edit(&mut self, new_data: &EntryData) {
-		self.history.push(new_data.clone());
+	// Keeping fields private and providing getters makes these fields readonly to the outside world.
+	pub fn get_id(&self) -> &ID {
+		&self.id
 	}
-
-	pub fn read_latest(&self) -> Option<&EntryData> {
-		self.history.last()
-	}
-}
-
-impl Default for Entry {
-	fn default() -> Self {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-
-		Entry {
-			id: rng.gen(),
-			history: Vec::new(),
-		}
-	}
-}
-
-// EntryData is basically an immutable structure.
-// Whenever it gets modified through its setters, time_created is updated and a new
-// EntryData is returned.
-#[derive(Clone, Serialize, Deserialize, Eq, PartialEq, Debug)]
-pub struct EntryData {
-	title: String,
-	username: String,
-	password: String,
-	url: String,
-	notes: String,
-	time_created: i64,
-}
-
-impl EntryData {
-	pub fn new(title: &str, username: &str, password: &str, url: &str, notes: &str) -> EntryData {
-		EntryData {
-			title: title.to_string(),
-			username: username.to_string(),
-			password: password.to_string(),
-			url: url.to_string(),
-			notes: notes.to_string(),
-			time_created: time::now_utc().to_timespec().sec,
-		}
-	}
-
 	pub fn get_title(&self) -> &str {
 		&self.title
 	}
@@ -116,38 +103,93 @@ impl EntryData {
 		self.time_created
 	}
 
-	pub fn set_title(&self, title: &str) -> EntryData {
-		EntryData {
-			title: title.to_string(),
-			..self.clone()
+	pub fn edit(&mut self, mut new_data: EntryHistory) {
+		// Set any fields in the EntryHistory to None if they don't actually cause any changes to our state
+		fn diff_option<T: PartialEq<T>>(option: &mut Option<T>, state: &T) {
+			if option.as_ref() == Some(state) {
+				*option = None
+			}
 		}
+
+		diff_option(&mut new_data.title, &self.title);
+		diff_option(&mut new_data.username, &self.username);
+		diff_option(&mut new_data.password, &self.password);
+		diff_option(&mut new_data.url, &self.url);
+		diff_option(&mut new_data.notes, &self.notes);
+
+		self.apply_history(&new_data);
+		self.history.push(new_data);
 	}
 
-	pub fn set_username(&self, username: &str) -> EntryData {
-		EntryData {
-			username: username.to_string(),
-			..self.clone()
+	// Used internally to apply an EntryHistory on top of this object's current state.
+	fn apply_history(&mut self, new_data: &EntryHistory) {
+		if let &Some(ref title) = &new_data.title {
+			self.title = title.clone();
+		}
+
+		if let &Some(ref username) = &new_data.username {
+			self.username = username.clone();
+		}
+
+		if let &Some(ref password) = &new_data.password {
+			self.password = password.clone();
+		}
+
+		if let &Some(ref url) = &new_data.url {
+			self.url = url.clone();
+		}
+
+		if let &Some(ref notes) = &new_data.notes {
+			self.notes = notes.clone();
 		}
 	}
+}
 
-	pub fn set_password(&self, password: &str) -> EntryData {
-		EntryData {
-			password: password.to_string(),
-			..self.clone()
+impl<'de> serde::Deserialize<'de> for Entry {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+	where
+		D: serde::Deserializer<'de>,
+	{
+		#[derive(Deserialize)]
+		struct PartialDeserialized {
+			id: ID,
+			history: Vec<EntryHistory>,
+			time_created: i64,
 		}
-	}
 
-	pub fn set_url(&self, url: &str) -> EntryData {
-		EntryData {
-			url: url.to_string(),
-			..self.clone()
+		let entry: PartialDeserialized = serde::Deserialize::deserialize(deserializer)?;
+		let history = entry.history.clone();
+		let mut entry = Entry::inner_new(entry.id, entry.history, entry.time_created);
+
+		// Re-construct current state from history
+		for history in &history {
+			entry.apply_history(history);
 		}
-	}
 
-	pub fn set_notes(&self, notes: &str) -> EntryData {
-		EntryData {
-			notes: notes.to_string(),
-			..self.clone()
+		Ok(entry)
+	}
+}
+
+
+#[derive(Clone, Serialize, Deserialize, Eq, PartialEq, Debug)]
+pub struct EntryHistory {
+	pub title: Option<String>,
+	pub username: Option<String>,
+	pub password: Option<String>,
+	pub url: Option<String>,
+	pub notes: Option<String>,
+	pub time: i64,
+}
+
+impl EntryHistory {
+	pub fn new(title: Option<String>, username: Option<String>, password: Option<String>, url: Option<String>, notes: Option<String>) -> EntryHistory {
+		EntryHistory {
+			title: title,
+			username: username,
+			password: password,
+			url: url,
+			notes: notes,
+			time: time::now_utc().to_timespec().sec,
 		}
 	}
 }
@@ -398,7 +440,7 @@ pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: b
 
 #[cfg(test)]
 mod tests {
-	use super::{Database, read_file, random_string, Entry, EntryData, ID};
+	use super::{Database, read_file, random_string, Entry, EntryHistory, ID};
 	use rand::{OsRng, Rng};
 	use rand::chacha::ChaChaRng;
 	use std::collections::HashMap;
@@ -504,6 +546,10 @@ mod tests {
 		assert!(chi_squared < 335.9);
 	}
 
+	fn random_option<R: Rng>(rng: &mut R) -> Option<()> {
+		if rng.gen() { Some(()) } else { None }
+	}
+
 	#[test]
 	fn test_database() {
 		let tmp_dir = TempDir::new("test").unwrap();
@@ -526,12 +572,12 @@ mod tests {
 			let number_of_edits: usize = rng.gen_range(0, 8);
 
 			for _ in 0..number_of_edits {
-				entry.edit(&EntryData::new(
-					&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
-					&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
-					&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
-					&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
-					&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()
+				entry.edit(EntryHistory::new(
+					random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
+					random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
+					random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
+					random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
+					random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
 				));
 			}
 
@@ -554,12 +600,12 @@ mod tests {
 				history.id
 			};
 			let entry = db2.get_entry_by_id_mut(&entry_id).unwrap();
-			entry.edit(&EntryData::new(
-				&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
-				&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
-				&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
-				&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>(),
-				&rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()
+			entry.edit(EntryHistory::new(
+				random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
+				random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
+				random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
+				random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
+				random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>())
 			));
 		}
 
@@ -578,18 +624,24 @@ mod tests {
 
 		let number_of_entries: usize = rng.gen_range(1, 16);
 
+		fn history_helper(state: &str, option: Option<String>) -> Option<String> {
+			option.and_then(|inner| if state == inner { None } else { Some(inner) })
+		}
+
 		for i in 0..number_of_entries {
 			let entry_id = db3.get_root().history[i].id;
 			let entry = db3.get_entry_by_id(&entry_id).unwrap();
 			let number_of_edits: usize = rng.gen_range(0, 8);
+			let mut state = Entry::new();
 
 			for j in 0..number_of_edits {
 				let history = &entry.history[j];
-				assert!(history.get_title() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
-				assert!(history.get_username() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
-				assert!(history.get_password() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
-				assert!(history.get_url() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
-				assert!(history.get_notes() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
+				assert_eq!(history.title, history_helper(state.get_title(), random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>())));
+				assert_eq!(history.username, history_helper(state.get_username(), random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>())));
+				assert_eq!(history.password, history_helper(state.get_password(), random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>())));
+				assert_eq!(history.url, history_helper(state.get_url(), random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>())));
+				assert_eq!(history.notes, history_helper(state.get_notes(), random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>())));
+				state.apply_history(history);
 			}
 		}
 
@@ -598,13 +650,22 @@ mod tests {
 			history.id
 		};
 		let entry = db3.get_entry_by_id(&entry_id).unwrap();
-		let latest = entry.read_latest().unwrap();
 
-		assert!(latest.get_title() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
-		assert!(latest.get_username() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
-		assert!(latest.get_password() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
-		assert!(latest.get_url() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
-		assert!(latest.get_notes() == rng.gen_iter::<char>().take(rng2.gen_range(0, 64)).collect::<String>());
+		if let Some(title) = random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()) {
+			assert!(entry.get_title() == title);
+		}
+		if let Some(username) = random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()) {
+			assert!(entry.get_username() == username);
+		}
+		if let Some(password) = random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()) {
+			assert!(entry.get_password() == password);
+		}
+		if let Some(url) = random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()) {
+			assert!(entry.get_url() == url);
+		}
+		if let Some(notes) = random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()) {
+			assert!(entry.get_notes() == notes);
+		}
 	}
 
 	// TODO: Test all the failure modes of opening a database

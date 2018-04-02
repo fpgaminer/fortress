@@ -144,8 +144,7 @@ fn create_and_fill_model(database: &Database) -> gtk::TreeModelFilter {
 
 	let mut entries: Vec<(ID, &str, i64)> = database.get_root().list_entries(&database).iter().map(|id| {
 		let entry = database.get_entry_by_id(id).unwrap();
-		let latest = entry.read_latest().unwrap();
-		(**id, latest.get_title(), latest.get_time_created())
+		(**id, entry.get_title(), entry.get_time_created())
 	}).collect();
 
 	// Sort by time created (and then by ID as a tie breaker)
@@ -395,13 +394,12 @@ impl App {
 				self.current_entry_id = Some(ID::from_slice(&mut HEXLOWER_PERMISSIVE.decode(hexid.as_bytes()).unwrap()).unwrap());
 
 				let entry = database.get_entry_by_id(&self.current_entry_id.unwrap()).unwrap();
-				let entry_data = entry.history.last().unwrap();
 
-				self.entry_title = entry_data.get_title().to_string();
-				self.entry_username = entry_data.get_username().to_string();
-				self.entry_password = entry_data.get_password().to_string();
-				self.entry_url = entry_data.get_url().to_string();
-				self.entry_notes = entry_data.get_notes().to_string();
+				self.entry_title = entry.get_title().to_string();
+				self.entry_username = entry.get_username().to_string();
+				self.entry_password = entry.get_password().to_string();
+				self.entry_url = entry.get_url().to_string();
+				self.entry_notes = entry.get_notes().to_string();
 
 				self.state = AppState::EditEntry;
 			}
@@ -425,23 +423,23 @@ impl App {
 
 	fn entry_save_clicked(&mut self) {
 		let notes_buffer = self.ui.entry_notes.get_buffer().unwrap();
-		let entry_data = libfortress::EntryData::new(
-			&self.ui.entry_title.get_text().unwrap(),
-			&self.ui.entry_username.get_text().unwrap(),
-			&self.ui.entry_password.get_text().unwrap(),
-			&self.ui.entry_url.get_text().unwrap(),
-			&notes_buffer.get_text(&notes_buffer.get_start_iter(), &notes_buffer.get_end_iter(), false).unwrap(),
+		let entry_data = libfortress::EntryHistory::new(
+			Some(self.ui.entry_title.get_text().unwrap()),
+			Some(self.ui.entry_username.get_text().unwrap()),
+			Some(self.ui.entry_password.get_text().unwrap()),
+			Some(self.ui.entry_url.get_text().unwrap()),
+			Some(notes_buffer.get_text(&notes_buffer.get_start_iter(), &notes_buffer.get_end_iter(), false).unwrap()),
 		);
 
 		if let Some(entry_id) = self.current_entry_id {
 			// Edit entry
 			let entry = self.database.as_mut().unwrap().get_entry_by_id_mut(&entry_id).unwrap();
-			entry.edit(&entry_data);
+			entry.edit(entry_data);
 		} else {
 			// New entry
 			let mut entry = libfortress::Entry::new();
-			entry.edit(&entry_data);
-			self.current_entry_id = Some(entry.id.clone());
+			entry.edit(entry_data);
+			self.current_entry_id = Some(entry.get_id().clone());
 			self.database.as_mut().unwrap().add_entry(entry);
 		}
 
