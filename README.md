@@ -17,17 +17,15 @@ I decided to write my own password manager.  I wanted a password manager that I 
 
 ### Motivation
 
-At its core, the on-disk format for Fortress is just encrypted JSON, because JSON simple, portable, and human readable.
+At its core, the on-disk format for Fortress is just encrypted JSON, because JSON is simple, portable, and human readable.
 
-The versioning system of Fortress is unique.  Every entry in a Fortress database stores a history so users can, for example, roll back to previous passwords.  In most systems versioning/history is normally handled using diffs, but Fortress chooses the most naive option: literally store a copy of every version of an entry as a list.  No diffs; just a verbatim copy of every version.
+A Fortress database consists of a collection of Objects, each of which is either a Directory or an Entry.  A Directory is just a list of other objects.  This builds a directory tree.  An Entry is basically just a HashMap; so it's just a key-value store, making it easy to adapt the database to new features in the future.
 
-Why?  It's simple, so it's easy to understand and audit.  That means less chance for bugs, and easier to extend and improve.  Serializing that data structure to JSON couldn't be easier.
+Every object in a Fortress database stores a history so users can roll back to previous passwords and undo mistakes.
 
-Of course, this data format is very inefficient, but Fortress has a trick to counteract that in the on-disk format.  GZip.  After serializing the database to JSON it gets compressed with GZip.  This compression not only counteracts the inefficency of JSON, but the redundancy of each entry's history is compressed away.  In my tests GZip turns an entry from X*N to basically just X+diffs, where X is the size of an entry version structure and N is the number of historical versions.  So gzip removes all the redundancy.  We get diffs for free, without any hassle.
+Using standard formats like JSON means that Fortress databases can be manipulated using existing tooling; even on the Linux command line.  Though this won't be common it's useful to have if, for example, someone wants to write third-party tools that work with Fortress databases.
 
-Using standard formats like Gzip and JSON means that Fortress databases can be manipulated using existing tooling; even on the Linux command line.  Even though this won't be common, it's useful to have if, for example, someone wants to write third-party tools that work with Fortress databases.
-
-The only caveat is encryption.  There's no good, standard encryption format.  So Fortress has to use its own, but again it's very simple.  On the command line Fortress can be commanded to encrypt/decrypt payloads using its encryption format, so it's still possible to easily get at the Gzip'd JSON inside a database (NOTE: TODO: --encrypt is not implemented yet).
+The only caveat is encryption.  There's no good, standard encryption format.  So Fortress has to use its own, but again it's very simple.  On the command line Fortress can be used to encrypt/decrypt payloads using its encryption format, so it's still possible to easily get at the JSON inside a database.
 
 ### Format (V1)
 
