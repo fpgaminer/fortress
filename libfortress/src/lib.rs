@@ -683,24 +683,26 @@ mod tests {
 			let entry = db3.get_entry_by_id(id).unwrap();
 			let title = entry.get("title");
 
-			if title == Some(&"Forgot this one".to_string()) {
-				assert_eq!(entry.history.len(), 2);
-				assert_eq!(entry.history[0].data.len(), 0);
-			}
-			else if title == Some(&"Test test".to_string()) {
-				assert_eq!(entry.get("username").unwrap(), "Username");
-				assert_eq!(entry.history.len(), 2);
-			}
-			else if title == Some(&"Ooops".to_string()) {
-				assert_eq!(entry["username"], "Username");
-				assert_eq!(entry.get_state()["password"], "Password");
-				assert_eq!(entry.history[0].data.len(), 0);
-				assert_eq!(entry.history[1].data["username"], "Username");
-				assert_eq!(entry.history[2].data.get("username"), None);
-				assert_eq!(entry.history[1]["title"], "Test test");
-			}
-			else {
-				panic!("Unknown title");
+			match title.map(|t| t.as_str()) {
+				Some("Forgot this one") => {
+					assert_eq!(entry.history.len(), 2);
+					assert_eq!(entry.history[0].data.len(), 0);
+				},
+				Some("Test test") => {
+					assert_eq!(entry.get("username").unwrap(), "Username");
+					assert_eq!(entry.history.len(), 2);
+				},
+				Some("Ooops") => {
+					assert_eq!(entry["username"], "Username");
+					assert_eq!(entry.get_state()["password"], "Password");
+					assert_eq!(entry.history[0].data.len(), 0);
+					assert_eq!(entry.history[1].data["username"], "Username");
+					assert_eq!(entry.history[2].data.get("username"), None);
+					assert_eq!(entry.history[1]["title"], "Test test");
+				}
+				_ => {
+					panic!("Unknown title");
+				}
 			}
 		}
 	}
