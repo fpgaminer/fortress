@@ -1,5 +1,4 @@
 // TODO: Change to deterministic encryption
-// TODO: Remove compression
 // TODO: Bump format version
 extern crate rand;
 extern crate time;
@@ -8,7 +7,6 @@ extern crate serde_derive;
 extern crate serde;
 extern crate serde_json;
 extern crate data_encoding;
-extern crate flate2;
 extern crate crypto;
 extern crate byteorder;
 extern crate tempdir;
@@ -17,11 +15,7 @@ pub mod encryption;
 #[macro_use] mod newtype_macros;
 
 use encryption::Encryptor;
-use flate2::Compression;
-use flate2::read::GzDecoder;
-use flate2::write::GzEncoder;
 use rand::{OsRng, Rng};
-use serde::Serialize;
 use std::collections::{HashSet, HashMap};
 use std::fs::File;
 use std::io::{self, Read, Write};
@@ -325,15 +319,8 @@ impl Database {
 	}
 
 	pub fn save_to_path<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
-		// Write serialized, compressed payload
-		let mut payload: Vec<u8> = Vec::new();
-		{
-			let compressed_writer = GzEncoder::new(&mut payload, Compression::Default);
-			let mut json_writer = serde_json::ser::Serializer::new(compressed_writer);
-
-			self.serialize(&mut json_writer)?;
-			json_writer.into_inner().finish()?; // TODO: Do we need to do this?  Can we just call flush?  Will the writer leaving scope force a flush?  Muh dunno...
-		}
+		// Serialized payload
+		let payload = serde_json::to_vec(&self)?;
 
 		// Encrypt
 		let output = self.encryptor.encrypt(&payload)?;
@@ -356,11 +343,8 @@ impl Database {
 
 		let (_, encryptor, plaintext) = Encryptor::decrypt(password, &rawdata)?;
 
-		// Decompress and deserialize
-		let db: SerializableDatabase = {
-			let d = GzDecoder::new(io::Cursor::new(plaintext)).unwrap();
-			serde_json::from_reader(d).unwrap()
-		};
+		// Deserialize
+		let db: SerializableDatabase = serde_json::from_slice(&plaintext)?;
 
 		// Keep encryptor for quicker saving later
 		Ok(Database {
