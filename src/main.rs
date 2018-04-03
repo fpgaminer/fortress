@@ -142,9 +142,9 @@ fn do_encrypt(path: &str, password: &str) {
 fn create_and_fill_model(database: &Database) -> gtk::TreeModelFilter {
 	let model = ListStore::new(&[String::static_type(), String::static_type()]);
 
-	let mut entries: Vec<(ID, &str, i64)> = database.get_root().list_entries(&database).iter().map(|id| {
+	let mut entries: Vec<(ID, String, i64)> = database.get_root().list_entries(&database).iter().map(|id| {
 		let entry = database.get_entry_by_id(id).unwrap();
-		(**id, entry.get_title(), entry.get_time_created())
+		(**id, entry["title"].clone(), entry.get_time_created())
 	}).collect();
 
 	// Sort by time created (and then by ID as a tie breaker)
@@ -395,11 +395,11 @@ impl App {
 
 				let entry = database.get_entry_by_id(&self.current_entry_id.unwrap()).unwrap();
 
-				self.entry_title = entry.get_title().to_string();
-				self.entry_username = entry.get_username().to_string();
-				self.entry_password = entry.get_password().to_string();
-				self.entry_url = entry.get_url().to_string();
-				self.entry_notes = entry.get_notes().to_string();
+				self.entry_title = entry["title"].to_string();
+				self.entry_username = entry["username"].to_string();
+				self.entry_password = entry["password"].to_string();
+				self.entry_url = entry["url"].to_string();
+				self.entry_notes = entry["notes"].to_string();
 
 				self.state = AppState::EditEntry;
 			}
@@ -423,13 +423,13 @@ impl App {
 
 	fn entry_save_clicked(&mut self) {
 		let notes_buffer = self.ui.entry_notes.get_buffer().unwrap();
-		let entry_data = libfortress::EntryHistory::new(
-			Some(self.ui.entry_title.get_text().unwrap()),
-			Some(self.ui.entry_username.get_text().unwrap()),
-			Some(self.ui.entry_password.get_text().unwrap()),
-			Some(self.ui.entry_url.get_text().unwrap()),
-			Some(notes_buffer.get_text(&notes_buffer.get_start_iter(), &notes_buffer.get_end_iter(), false).unwrap()),
-		);
+		let entry_data = libfortress::EntryHistory::new([
+			("title".to_string(), self.ui.entry_title.get_text().unwrap()),
+			("username".to_string(), self.ui.entry_username.get_text().unwrap()),
+			("password".to_string(), self.ui.entry_password.get_text().unwrap()),
+			("url".to_string(), self.ui.entry_url.get_text().unwrap()),
+			("notes".to_string(), notes_buffer.get_text(&notes_buffer.get_start_iter(), &notes_buffer.get_end_iter(), false).unwrap()),
+		].iter().cloned().collect());
 
 		if let Some(entry_id) = self.current_entry_id {
 			// Edit entry

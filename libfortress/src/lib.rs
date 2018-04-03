@@ -1,6 +1,5 @@
 // TODO: Change to deterministic encryption
-// TODO: Remove compression and switch to a diff format
-// TODO: Switch to HashMap for Entries
+// TODO: Remove compression
 // TODO: Bump format version
 extern crate rand;
 extern crate time;
@@ -28,6 +27,9 @@ use std::fs::File;
 use std::io::{self, Read, Write};
 use std::path::Path;
 use std::str;
+use std::hash::Hash;
+use std::ops::Index;
+use std::borrow::Borrow;
 
 
 new_type!{
@@ -41,17 +43,9 @@ pub struct Entry {
 	history: Vec<EntryHistory>,
 	time_created: i64,
 
-	// These all represent the current state of the Entry
+	// The current state of the entry
 	#[serde(skip_serializing, skip_deserializing)]
-	title: String,
-	#[serde(skip_serializing, skip_deserializing)]
-	username: String,
-	#[serde(skip_serializing, skip_deserializing)]
-	password: String,
-	#[serde(skip_serializing, skip_deserializing)]
-	url: String,
-	#[serde(skip_serializing, skip_deserializing)]
-	notes: String,
+	state: HashMap<String, String>,
 }
 
 impl Entry {
@@ -67,11 +61,7 @@ impl Entry {
 			history: history,
 			time_created: time_created,
 
-			title: String::new(),
-			username: String::new(),
-			password: String::new(),
-			url: String::new(),
-			notes: String::new(),
+			state: HashMap::new(),
 		}
 	}
 
@@ -79,43 +69,25 @@ impl Entry {
 	pub fn get_id(&self) -> &ID {
 		&self.id
 	}
-	pub fn get_title(&self) -> &str {
-		&self.title
-	}
-
-	pub fn get_username(&self) -> &str {
-		&self.username
-	}
-
-	pub fn get_password(&self) -> &str {
-		&self.password
-	}
-
-	pub fn get_url(&self) -> &str {
-		&self.url
-	}
-
-	pub fn get_notes(&self) -> &str {
-		&self.notes
-	}
 
 	pub fn get_time_created(&self) -> i64 {
 		self.time_created
 	}
 
-	pub fn edit(&mut self, mut new_data: EntryHistory) {
-		// Set any fields in the EntryHistory to None if they don't actually cause any changes to our state
-		fn diff_option<T: PartialEq<T>>(option: &mut Option<T>, state: &T) {
-			if option.as_ref() == Some(state) {
-				*option = None
-			}
-		}
+	pub fn get_state(&self) -> &HashMap<String, String> {
+		&self.state
+	}
 
-		diff_option(&mut new_data.title, &self.title);
-		diff_option(&mut new_data.username, &self.username);
-		diff_option(&mut new_data.password, &self.password);
-		diff_option(&mut new_data.url, &self.url);
-		diff_option(&mut new_data.notes, &self.notes);
+	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&String>
+		where Q: Hash + Eq,
+			  String: Borrow<Q>
+	{
+		self.state.get(key)
+	}
+
+	pub fn edit(&mut self, mut new_data: EntryHistory) {
+		// Remove any fields from the EntryHistory if they don't actually cause any changes to our state
+		new_data.data.retain(|k, v| self.state.get(k) != Some(v));
 
 		self.apply_history(&new_data);
 		self.history.push(new_data);
@@ -123,25 +95,21 @@ impl Entry {
 
 	// Used internally to apply an EntryHistory on top of this object's current state.
 	fn apply_history(&mut self, new_data: &EntryHistory) {
-		if let &Some(ref title) = &new_data.title {
-			self.title = title.clone();
+		for (key, value) in &new_data.data {
+			self.state.insert(key.to_string(), value.to_string());
 		}
+	}
+}
 
-		if let &Some(ref username) = &new_data.username {
-			self.username = username.clone();
-		}
+impl<'a, Q: ?Sized> Index<&'a Q> for Entry
+	where Q: Eq + Hash,
+		  String: Borrow<Q>
+{
+	type Output = String;
 
-		if let &Some(ref password) = &new_data.password {
-			self.password = password.clone();
-		}
-
-		if let &Some(ref url) = &new_data.url {
-			self.url = url.clone();
-		}
-
-		if let &Some(ref notes) = &new_data.notes {
-			self.notes = notes.clone();
-		}
+	#[inline]
+	fn index(&self, key: &Q) -> &String {
+		self.get(key).expect("no entry found for key")
 	}
 }
 
@@ -173,24 +141,35 @@ impl<'de> serde::Deserialize<'de> for Entry {
 
 #[derive(Clone, Serialize, Deserialize, Eq, PartialEq, Debug)]
 pub struct EntryHistory {
-	pub title: Option<String>,
-	pub username: Option<String>,
-	pub password: Option<String>,
-	pub url: Option<String>,
-	pub notes: Option<String>,
 	pub time: i64,
+	pub data: HashMap<String, String>,
 }
 
 impl EntryHistory {
-	pub fn new(title: Option<String>, username: Option<String>, password: Option<String>, url: Option<String>, notes: Option<String>) -> EntryHistory {
+	pub fn new(data: HashMap<String, String>) -> EntryHistory {
 		EntryHistory {
-			title: title,
-			username: username,
-			password: password,
-			url: url,
-			notes: notes,
 			time: time::now_utc().to_timespec().sec,
+			data: data,
 		}
+	}
+
+	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&String>
+		where Q: Hash + Eq,
+			  String: Borrow<Q>
+	{
+		self.data.get(key)
+	}
+}
+
+impl<'a, Q: ?Sized> Index<&'a Q> for EntryHistory
+	where Q: Eq + Hash,
+		  String: Borrow<Q>
+{
+	type Output = String;
+
+	#[inline]
+	fn index(&self, key: &Q) -> &String {
+		self.get(key).expect("no entry found for key")
 	}
 }
 
@@ -442,7 +421,6 @@ pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: b
 mod tests {
 	use super::{Database, read_file, random_string, Entry, EntryHistory, ID};
 	use rand::{OsRng, Rng};
-	use rand::chacha::ChaChaRng;
 	use std::collections::HashMap;
 	use tempdir::TempDir;
 
@@ -466,12 +444,43 @@ mod tests {
 
 	#[test]
 	fn password_change() {
+		let tmp_dir = TempDir::new("test").unwrap();
+
+		// Create DB
 		let mut db = Database::new_with_password("password".as_bytes());
 		let old_salt = db.encryptor.params.salt.clone();
 		let old_master_key = db.encryptor.master_key.clone();
+
+		let mut entry = Entry::new();
+		entry.edit(EntryHistory::new(HashMap::new()));
+		entry.edit(EntryHistory::new([
+			("title".to_string(), "Password change".to_string()),
+			].iter().cloned().collect()));
+		db.add_entry(entry);
+
+		// Save
+		db.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
+
 		db.change_password("password".as_bytes());
 		assert!(db.encryptor.params.salt != old_salt);
 		assert!(db.encryptor.master_key != old_master_key);
+
+		db.change_password("password2".as_bytes());
+		assert!(db.encryptor.params.salt != old_salt);
+		assert!(db.encryptor.master_key != old_master_key);
+
+		// Save
+		db.save_to_path(tmp_dir.path().join("test2.fortressdb")).unwrap();
+
+		// Load
+		let db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), "password".as_bytes()).unwrap();
+		let db3 = Database::load_from_path(tmp_dir.path().join("test2.fortressdb"), "password2".as_bytes()).unwrap();
+		Database::load_from_path(tmp_dir.path().join("test2.fortressdb"), "password".as_bytes()).expect_err("Shouldn't be able to load database with old password");
+
+		assert_eq!(db.objects, db2.objects);
+		assert_eq!(db.root_directory, db2.root_directory);
+		assert_eq!(db.objects, db3.objects);
+		assert_eq!(db.root_directory, db3.root_directory);
 	}
 
 	// Make sure every encryption uses a different encryption key
@@ -546,125 +555,169 @@ mod tests {
 		assert!(chi_squared < 335.9);
 	}
 
-	fn random_option<R: Rng>(rng: &mut R) -> Option<()> {
-		if rng.gen() { Some(()) } else { None }
-	}
-
+	// Make sure database can handle Unicode characters everywhere
 	#[test]
-	fn test_database() {
+	fn test_unicode() {
 		let tmp_dir = TempDir::new("test").unwrap();
 		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-		let seed1: u64 = rng.next_u64();
-		let seed2: u64 = rng.next_u64();
 
-		// Build a random database
-		let mut rng = ChaChaRng::new_unseeded();
-		rng.set_counter(seed1, seed2);
-		let mut rng2 = ChaChaRng::new_unseeded();
-		rng2.set_counter(seed1, seed2);
-		let password = rng.gen_iter::<char>().take(20).collect::<String>();
-
+		// Unicode in password
+		let password = rng.gen_iter::<char>().take(256).collect::<String>();
 		let mut db = Database::new_with_password(password.as_bytes());
-		let number_of_entries: usize = rng.gen_range(1, 16);
 
-		for _ in 0..number_of_entries {
-			let mut entry = Entry::new();
-			let number_of_edits: usize = rng.gen_range(0, 8);
+		// Unicode in entries
+		let a = rng.gen_iter::<char>().take(256).collect::<String>();
+		let b = rng.gen_iter::<char>().take(256).collect::<String>();
+		let c = rng.gen_iter::<char>().take(256).collect::<String>();
 
-			for _ in 0..number_of_edits {
-				entry.edit(EntryHistory::new(
-					random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
-					random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
-					random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
-					random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
-					random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
-				));
-			}
-
-			db.add_entry(entry);
-		}
+		let mut entry = Entry::new();
+		entry.edit(EntryHistory::new(HashMap::new()));
+		entry.edit(EntryHistory::new([
+			(rng.gen_iter::<char>().take(256).collect::<String>(), rng.gen_iter::<char>().take(256).collect::<String>()),
+			(rng.gen_iter::<char>().take(256).collect::<String>(), rng.gen_iter::<char>().take(256).collect::<String>()),
+			(a.clone(), b.clone()),
+			].iter().cloned().collect()));
+		entry.edit(EntryHistory::new([
+			(rng.gen_iter::<char>().take(256).collect::<String>(), rng.gen_iter::<char>().take(256).collect::<String>()),
+			(rng.gen_iter::<char>().take(256).collect::<String>(), rng.gen_iter::<char>().take(256).collect::<String>()),
+			(rng.gen_iter::<char>().take(256).collect::<String>(), rng.gen_iter::<char>().take(256).collect::<String>()),
+			(a.clone(), c.clone()),
+			].iter().cloned().collect()));
+		db.add_entry(entry);
 
 		// Save
 		db.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
 
 		// Load
-		let mut db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), password.as_bytes()).unwrap();
+		let db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), password.as_bytes()).unwrap();
+		assert_eq!(db, db2);
+
+		let entry_id = db2.get_root().list_entries(&db2)[0];
+		let entry = db2.get_entry_by_id(entry_id).unwrap();
+
+		assert_eq!(entry[&a], c);
+	}
+
+	#[test]
+	fn test_empty() {
+		let tmp_dir = TempDir::new("test").unwrap();
+
+		// Test empty password
+		let mut db = Database::new_with_password(&[]);
+
+		// Test empty entry
+		db.add_entry(Entry::new());
+
+		// Save
+		db.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
+
+		// Load
+		let db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), &[]).unwrap();
+		assert_eq!(db, db2);
+
+		let entry_id = db2.get_root().list_entries(&db2)[0];
+		let entry = db2.get_entry_by_id(entry_id).unwrap();
+
+		assert_eq!(entry.get_state().len(), 0);
+
+		// Test empty database
+		let db = Database::new_with_password("foobar".as_bytes());
+
+		// Save
+		db.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
+
+		// Load
+		let db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), "foobar".as_bytes()).unwrap();
+		assert_eq!(db, db2);
+
+		assert_eq!(db2.objects.len(), 1);
+	}
+
+	// Integration test on the whole Database
+	// Simulate typical usage of Database, exercising as many features as possible, and make sure Database operates correctly.
+	#[test]
+	fn test_database() {
+		let tmp_dir = TempDir::new("test").unwrap();
+
+		// Build database
+		let mut db = Database::new_with_password("foobar".as_bytes());
+
+		let mut entry = Entry::new();
+		entry.edit(EntryHistory::new(HashMap::new()));
+		db.add_entry(entry);
+
+		let mut entry = Entry::new();
+		entry.edit(EntryHistory::new(HashMap::new()));
+		entry.edit(EntryHistory::new([
+			("title".to_string(), "Test test".to_string()),
+			("username".to_string(), "Username".to_string())
+			].iter().cloned().collect()));
+		db.add_entry(entry);
+
+		let mut entry = Entry::new();
+		entry.edit(EntryHistory::new(HashMap::new()));
+		entry.edit(EntryHistory::new([
+			("title".to_string(), "Test test".to_string()),
+			("username".to_string(), "Username".to_string()),
+			].iter().cloned().collect()));
+		entry.edit(EntryHistory::new([
+			("username".to_string(), "Username".to_string()),
+			("title".to_string(), "Ooops".to_string()),
+			("password".to_string(), "Password".to_string()),
+			].iter().cloned().collect()));
+		db.add_entry(entry);
+
+		// Save
+		db.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
+
+		// Load
+		let mut db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), "foobar".as_bytes()).unwrap();
+		assert_eq!(db, db2);
 
 		// Edit
-		// NOTE: The method of using the root directory's history to select a random entry is a bit of a hack.
-		// We want something repeatable, but objects in the database get indexed using HashMap and HashSet.
-		// So we just dig through the history as a workaround for now.
+		let entry_id: ID = **db2.get_root().list_entries(&db2).iter().find(|id| {
+			let entry = db2.get_entry_by_id(id).unwrap();
+
+			entry.get("title") == None
+		}).unwrap();
+
 		{
-			let entry_id: ID = {
-				let history = rng.choose(&db2.get_root().history).unwrap();
-				history.id
-			};
 			let entry = db2.get_entry_by_id_mut(&entry_id).unwrap();
-			entry.edit(EntryHistory::new(
-				random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
-				random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
-				random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
-				random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()),
-				random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>())
-			));
+			entry.edit(EntryHistory::new([
+				("title".to_string(), "Forgot this one".to_string()),
+				].iter().cloned().collect()));
 		}
 
 		// Save
 		db2.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
 
-		// Compare using the original random stream
-		let mut rng = ChaChaRng::new_unseeded();
-		rng.set_counter(seed1, seed2);
-		let mut rng2 = ChaChaRng::new_unseeded();
-		rng2.set_counter(seed1, seed2);
-		let password = rng.gen_iter::<char>().take(20).collect::<String>();
-
-		let db3 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), password.as_bytes()).unwrap();
+		// Load
+		let db3 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), "foobar".as_bytes()).unwrap();
 		assert_eq!(db2, db3);
 
-		let number_of_entries: usize = rng.gen_range(1, 16);
+		for id in db3.get_root().list_entries(&db3) {
+			let entry = db3.get_entry_by_id(id).unwrap();
+			let title = entry.get("title");
 
-		fn history_helper(state: &str, option: Option<String>) -> Option<String> {
-			option.and_then(|inner| if state == inner { None } else { Some(inner) })
-		}
-
-		for i in 0..number_of_entries {
-			let entry_id = db3.get_root().history[i].id;
-			let entry = db3.get_entry_by_id(&entry_id).unwrap();
-			let number_of_edits: usize = rng.gen_range(0, 8);
-			let mut state = Entry::new();
-
-			for j in 0..number_of_edits {
-				let history = &entry.history[j];
-				assert_eq!(history.title, history_helper(state.get_title(), random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>())));
-				assert_eq!(history.username, history_helper(state.get_username(), random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>())));
-				assert_eq!(history.password, history_helper(state.get_password(), random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>())));
-				assert_eq!(history.url, history_helper(state.get_url(), random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>())));
-				assert_eq!(history.notes, history_helper(state.get_notes(), random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>())));
-				state.apply_history(history);
+			if title == Some(&"Forgot this one".to_string()) {
+				assert_eq!(entry.history.len(), 2);
+				assert_eq!(entry.history[0].data.len(), 0);
 			}
-		}
-
-		let entry_id: ID = {
-			let history = rng.choose(&db3.get_root().history).unwrap();
-			history.id
-		};
-		let entry = db3.get_entry_by_id(&entry_id).unwrap();
-
-		if let Some(title) = random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()) {
-			assert!(entry.get_title() == title);
-		}
-		if let Some(username) = random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()) {
-			assert!(entry.get_username() == username);
-		}
-		if let Some(password) = random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()) {
-			assert!(entry.get_password() == password);
-		}
-		if let Some(url) = random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()) {
-			assert!(entry.get_url() == url);
-		}
-		if let Some(notes) = random_option(&mut rng).map(|_| rng.gen_iter::<char>().take(rng2.gen_range(0,64)).collect::<String>()) {
-			assert!(entry.get_notes() == notes);
+			else if title == Some(&"Test test".to_string()) {
+				assert_eq!(entry.get("username").unwrap(), "Username");
+				assert_eq!(entry.history.len(), 2);
+			}
+			else if title == Some(&"Ooops".to_string()) {
+				assert_eq!(entry["username"], "Username");
+				assert_eq!(entry.get_state()["password"], "Password");
+				assert_eq!(entry.history[0].data.len(), 0);
+				assert_eq!(entry.history[1].data["username"], "Username");
+				assert_eq!(entry.history[2].data.get("username"), None);
+				assert_eq!(entry.history[1]["title"], "Test test");
+			}
+			else {
+				panic!("Unknown title");
+			}
 		}
 	}
 
