@@ -1,3 +1,11 @@
+extern crate byteorder;
+extern crate crypto;
+extern crate rand;
+extern crate data_encoding;
+extern crate serde;
+
+#[macro_use] mod newtype_macros;
+
 use byteorder::{ReadBytesExt, WriteBytesExt, LittleEndian};
 use crypto::{scrypt, chacha20};
 use crypto::digest::Digest;
@@ -68,6 +76,11 @@ impl LoginKey {
 	pub fn derive(master_key: &MasterKey) -> LoginKey {
 		LoginKey(derive_key(&Key(master_key.0), DerivativeKeyId::LoginKey).0)
 	}
+}
+
+
+pub fn hash_username_for_login(username: &[u8]) -> Vec<u8> {
+	hmac(&LOGIN_USERNAME_SALT, username).code().to_vec()
 }
 
 

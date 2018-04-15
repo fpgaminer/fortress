@@ -1,0 +1,11 @@
+[package]
+authors = ["fpgaminer"]
+name = "fortresscrypto"
+version = "0.0.1"
+
+[dependencies]
+byteorder = "1.0"
+rand = "0.3"
+rust-crypto = "0.2"
+data-encoding = "2.0.0-rc.1"
+serde = "1.0"

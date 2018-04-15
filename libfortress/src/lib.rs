@@ -8,9 +8,9 @@ extern crate data_encoding;
 extern crate crypto;
 extern crate byteorder;
 extern crate tempdir;
+pub extern crate fortresscrypto;
 
 #[macro_use] mod newtype_macros;
-pub mod encryption;
 
 use rand::{OsRng, Rng};
 use std::collections::{HashSet, HashMap};
@@ -21,7 +21,7 @@ use std::str;
 use std::hash::Hash;
 use std::ops::Index;
 use std::borrow::Borrow;
-use encryption::{MasterKey, EncryptionParameters, FileKeySuite};
+use fortresscrypto::{MasterKey, EncryptionParameters, FileKeySuite};
 
 
 new_type!{
@@ -334,7 +334,7 @@ impl Database {
 		let file = File::create(path)?;
 		let mut writer = BufWriter::new(file);
 		
-		encryption::encrypt_to_file(&mut writer, &payload, &self.encryption_parameters, &self.file_key_suite)
+		fortresscrypto::encrypt_to_file(&mut writer, &payload, &self.encryption_parameters, &self.file_key_suite)
 	}
 
 	pub fn load_from_path<P: AsRef<Path>>(path: P, password: &[u8]) -> io::Result<Database> {
@@ -352,7 +352,7 @@ impl Database {
 			let file = File::open(path)?;
 			let mut reader = BufReader::new(file);
 
-			encryption::decrypt_from_file(&mut reader, password)?
+			fortresscrypto::decrypt_from_file(&mut reader, password)?
 		};
 		
 		// Deserialize

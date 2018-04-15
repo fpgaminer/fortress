@@ -118,7 +118,7 @@ fn do_decrypt(path: &str, password: &str) {
 		let file = File::open(path).unwrap();
 		let mut reader = BufReader::new(file);
 
-		libfortress::encryption::decrypt_from_file(&mut reader, password.as_bytes()).unwrap()
+		libfortress::fortresscrypto::decrypt_from_file(&mut reader, password.as_bytes()).unwrap()
 	};
 
 	io::stdout().write(&payload).unwrap();
@@ -133,9 +133,9 @@ fn do_encrypt(path: &str, password: &str) {
 	};
 
 	let encryption_parameters = Default::default();
-	let file_key_suite = libfortress::encryption::FileKeySuite::derive(password.as_bytes(), &encryption_parameters);
+	let file_key_suite = libfortress::fortresscrypto::FileKeySuite::derive(password.as_bytes(), &encryption_parameters);
 
-	libfortress::encryption::encrypt_to_file(&mut io::stdout(), &payload, &encryption_parameters, &file_key_suite).unwrap();
+	libfortress::fortresscrypto::encrypt_to_file(&mut io::stdout(), &payload, &encryption_parameters, &file_key_suite).unwrap();
 }
 
 
