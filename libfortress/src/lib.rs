@@ -1,5 +1,3 @@
-// TODO: Change to deterministic encryption
-// TODO: Bump format version
 extern crate rand;
 extern crate time;
 #[macro_use]
@@ -11,19 +9,19 @@ extern crate crypto;
 extern crate byteorder;
 extern crate tempdir;
 
-pub mod encryption;
 #[macro_use] mod newtype_macros;
+pub mod encryption;
 
-use encryption::Encryptor;
 use rand::{OsRng, Rng};
 use std::collections::{HashSet, HashMap};
 use std::fs::File;
-use std::io::{self, Read, Write};
+use std::io::{self, BufReader, BufWriter};
 use std::path::Path;
 use std::str;
 use std::hash::Hash;
 use std::ops::Index;
 use std::borrow::Borrow;
+use encryption::{MasterKey, EncryptionParameters, FileKeySuite};
 
 
 new_type!{
@@ -255,13 +253,20 @@ pub enum DatabaseObject {
 pub struct Database {
 	objects: HashMap<ID, DatabaseObject>,
 	root_directory: ID,
+
+	master_key: Option<MasterKey>,
+
 	#[serde(skip_serializing, skip_deserializing)]
-	encryptor: Encryptor,
+	encryption_parameters: EncryptionParameters,
+	#[serde(skip_serializing, skip_deserializing)]
+	file_key_suite: FileKeySuite,
 }
 
 impl Database {
 	pub fn new_with_password(password: &[u8]) -> Database {
 		let encryption_parameters = Default::default();
+		let file_key_suite = FileKeySuite::derive(password, &encryption_parameters);
+		let master_key = None;  //TODO: MasterKey::derive(username, password);
 
 		let root = Directory::new();
 		let root_directory = root.id;
@@ -271,13 +276,16 @@ impl Database {
 		Database {
 			objects: objects,
 			root_directory: root_directory,
-			encryptor: Encryptor::new(password, encryption_parameters),
+			master_key: master_key,
+			encryption_parameters: encryption_parameters,
+			file_key_suite: file_key_suite,
 		}
 	}
 
 	pub fn change_password(&mut self, password: &[u8]) {
-		let encryption_parameters = Default::default();
-		self.encryptor = Encryptor::new(password, encryption_parameters);
+		self.encryption_parameters = Default::default();
+		self.file_key_suite = FileKeySuite::derive(password, &self.encryption_parameters);
+		self.master_key = None;  // TODO: Derive
 	}
 
 	pub fn get_root(&self) -> &Directory {
@@ -322,12 +330,11 @@ impl Database {
 		// Serialized payload
 		let payload = serde_json::to_vec(&self)?;
 
-		// Encrypt
-		let output = self.encryptor.encrypt(&payload)?;
-
-		// Write to file
-		let mut file = File::create(path)?;
-		file.write_all(&output)
+		// Encrypt and write to file
+		let file = File::create(path)?;
+		let mut writer = BufWriter::new(file);
+		
+		encryption::encrypt_to_file(&mut writer, &payload, &self.encryption_parameters, &self.file_key_suite)
 	}
 
 	pub fn load_from_path<P: AsRef<Path>>(path: P, password: &[u8]) -> io::Result<Database> {
@@ -337,29 +344,30 @@ impl Database {
 		struct SerializableDatabase {
 			objects: HashMap<ID, DatabaseObject>,
 			root_directory: ID,
+			master_key: Option<MasterKey>,
 		}
+
+		// Read file and decrypt
+		let (plaintext, encryption_parameters, file_key_suite) = {
+			let file = File::open(path)?;
+			let mut reader = BufReader::new(file);
+
+			encryption::decrypt_from_file(&mut reader, password)?
+		};
 		
-		let rawdata = read_file(path)?;
-
-		let (_, encryptor, plaintext) = Encryptor::decrypt(password, &rawdata)?;
-
 		// Deserialize
 		let db: SerializableDatabase = serde_json::from_slice(&plaintext)?;
 
-		// Keep encryptor for quicker saving later
+		// Keep encryption keys for quicker saving later
 		Ok(Database {
-			encryptor: encryptor,
 			objects: db.objects,
 			root_directory: db.root_directory,
+			master_key: db.master_key,
+
+			encryption_parameters: encryption_parameters,
+			file_key_suite: file_key_suite,
 		})
 	}
-}
-
-
-fn read_file<P: AsRef<Path>>(path: P) -> io::Result<Vec<u8>> {
-	let mut data = Vec::new();
-	File::open(path)?.read_to_end(&mut data)?;
-	Ok(data)
 }
 
 
@@ -403,7 +411,7 @@ pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: b
 
 #[cfg(test)]
 mod tests {
-	use super::{Database, read_file, random_string, Entry, EntryHistory, ID};
+	use super::{Database, random_string, Entry, EntryHistory, ID};
 	use rand::{OsRng, Rng};
 	use std::collections::HashMap;
 	use tempdir::TempDir;
@@ -432,8 +440,8 @@ mod tests {
 
 		// Create DB
 		let mut db = Database::new_with_password("password".as_bytes());
-		let old_salt = db.encryptor.params.salt.clone();
-		let old_master_key = db.encryptor.master_key.clone();
+		let old_salt = db.encryption_parameters.salt.clone();
+		let old_file_key_suite = db.file_key_suite.clone();
 
 		let mut entry = Entry::new();
 		entry.edit(EntryHistory::new(HashMap::new()));
@@ -445,13 +453,14 @@ mod tests {
 		// Save
 		db.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
 
+		// Password change should change file encryption keys, even if using the same password
 		db.change_password("password".as_bytes());
-		assert!(db.encryptor.params.salt != old_salt);
-		assert!(db.encryptor.master_key != old_master_key);
+		assert_ne!(db.encryption_parameters.salt, old_salt);
+		assert_ne!(db.file_key_suite, old_file_key_suite);
 
 		db.change_password("password2".as_bytes());
-		assert!(db.encryptor.params.salt != old_salt);
-		assert!(db.encryptor.master_key != old_master_key);
+		assert_ne!(db.encryption_parameters.salt, old_salt);
+		assert_ne!(db.file_key_suite, old_file_key_suite);
 
 		// Save
 		db.save_to_path(tmp_dir.path().join("test2.fortressdb")).unwrap();
@@ -467,32 +476,17 @@ mod tests {
 		assert_eq!(db.root_directory, db3.root_directory);
 	}
 
-	// Make sure every encryption uses a different encryption key
-	#[test]
-	fn encryption_is_salted() {
-		let tmp_dir = TempDir::new("test").unwrap();
-
-		let db = Database::new_with_password("password".as_bytes());
-		db.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
-		db.save_to_path(tmp_dir.path().join("test2.fortressdb")).unwrap();
-
-		let encrypted1 = read_file(tmp_dir.path().join("test.fortressdb")).unwrap();
-		let encrypted2 = read_file(tmp_dir.path().join("test2.fortressdb")).unwrap();
-
-		assert!(encrypted1 != encrypted2);
-	}
-
 	// Just some sanity checks on our keys
 	#[test]
 	fn key_sanity_checks() {
 		let db = Database::new_with_password("password".as_bytes());
 		let db2 = Database::new_with_password("password".as_bytes());
-		let zeros = [0u8; 32];
 
 		assert!(db != db2);
-		assert!(db.encryptor.master_key != db2.encryptor.master_key);
-		assert!(db.encryptor.master_key != zeros);
-		assert!(db.encryptor.params.salt != zeros);
+		assert_ne!(db.encryption_parameters, db2.encryption_parameters);
+		assert_ne!(db.file_key_suite, db2.file_key_suite);
+		assert_eq!(db.master_key, db2.master_key);
+		// TODO: assert_eq!(db.network_key_suite, db2.network_key_suite);
 	}
 
 	#[test]

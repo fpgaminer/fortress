@@ -11,7 +11,7 @@ use libfortress::{Database, ID};
 use std::cell::RefCell;
 use std::env;
 use std::fs::File;
-use std::io::{self, Write, Read};
+use std::io::{self, Write, Read, BufReader};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::mpsc::{channel, Sender, Receiver};
@@ -113,29 +113,29 @@ fn main() {
 
 
 fn do_decrypt(path: &str, password: &str) {
-	let data = {
-		let mut data = Vec::new();
-		File::open(path).unwrap().read_to_end(&mut data).unwrap();
-		data
+	// Read file and decrypt
+	let (payload, _, _) = {
+		let file = File::open(path).unwrap();
+		let mut reader = BufReader::new(file);
+
+		libfortress::encryption::decrypt_from_file(&mut reader, password.as_bytes()).unwrap()
 	};
 
-	let (_, _, payload) = libfortress::encryption::Encryptor::decrypt(password.as_bytes(), &data).unwrap();
 	io::stdout().write(&payload).unwrap();
 }
 
 
 fn do_encrypt(path: &str, password: &str) {
-	let data = {
+	let payload = {
 		let mut data = Vec::new();
 		File::open(path).unwrap().read_to_end(&mut data).unwrap();
 		data
 	};
 
 	let encryption_parameters = Default::default();
-	let encryptor = libfortress::encryption::Encryptor::new(password.as_bytes(), encryption_parameters);
+	let file_key_suite = libfortress::encryption::FileKeySuite::derive(password.as_bytes(), &encryption_parameters);
 
-	let result = encryptor.encrypt(&data).unwrap();
-	io::stdout().write(&result).unwrap();
+	libfortress::encryption::encrypt_to_file(&mut io::stdout(), &payload, &encryption_parameters, &file_key_suite).unwrap();
 }
 
 
