@@ -13,7 +13,7 @@ pub extern crate fortresscrypto;
 #[macro_use] mod newtype_macros;
 
 use rand::{OsRng, Rng};
-use std::collections::{HashSet, HashMap};
+use std::collections::{HashSet, HashMap, BTreeMap};
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter};
 use std::path::Path;
@@ -29,7 +29,7 @@ new_type!{
 }
 
 
-#[derive(Serialize, Eq, PartialEq, Debug)]
+#[derive(Serialize, Eq, PartialEq, Debug, Clone)]
 pub struct Entry {
 	id: ID,
 	history: Vec<EntryHistory>,
@@ -75,6 +75,10 @@ impl Entry {
 			  String: Borrow<Q>
 	{
 		self.state.get(key)
+	}
+
+	pub fn get_history(&self) -> &Vec<EntryHistory> {
+		&self.history
 	}
 
 	pub fn edit(&mut self, mut new_data: EntryHistory) {
@@ -134,6 +138,7 @@ impl<'de> serde::Deserialize<'de> for Entry {
 #[derive(Clone, Serialize, Deserialize, Eq, PartialEq, Debug)]
 pub struct EntryHistory {
 	pub time: i64,
+	#[serde(serialize_with = "ordered_map")]
 	pub data: HashMap<String, String>,
 }
 
@@ -165,13 +170,27 @@ impl<'a, Q: ?Sized> Index<&'a Q> for EntryHistory
 	}
 }
 
+// We have to use this so that the serialization for EntryHistory is deterministic (always the same for the same input).
+// If we didn't, the serialized form would change each time, which would cause problems for synchronization.
+fn ordered_map<S, K, V>(value: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
+	where S: serde::Serializer,
+	      K: Eq + Hash + Ord + serde::Serialize,
+		  V: serde::Serialize
+{
+	use serde::Serialize;
+
+	let ordered: BTreeMap<_, _> = value.iter().collect();
+	ordered.serialize(serializer)
+}
+
 // A directory is a list of references to Entries and Directories, much like a filesystem directory.
-#[derive(Serialize, Eq, PartialEq, Debug)]
+#[derive(Serialize, Eq, PartialEq, Debug, Clone)]
 pub struct Directory {
-	pub id: ID,
+	id: ID,
+	history: Vec<DirectoryHistory>,
+
 	#[serde(skip_serializing)]
 	pub entries: HashSet<ID>,
-	history: Vec<DirectoryHistory>,
 }
 
 impl Directory {
@@ -185,11 +204,26 @@ impl Directory {
 		}
 	}
 
+	pub fn get_id(&self) -> &ID {
+		&self.id
+	}
+
 	pub fn add(&mut self, id: ID) {
 		self.entries.insert(id);
 		self.history.push(DirectoryHistory {
 			id: id,
 			action: DirectoryHistoryAction::Add,
+		});
+	}
+
+	pub fn remove(&mut self, id: ID) {
+		if !self.entries.remove(&id) {
+			panic!("Attempt to remove an ID from directory that doesn't exist");
+		}
+
+		self.history.push(DirectoryHistory {
+			id: id,
+			action: DirectoryHistoryAction::Remove,
 		});
 	}
 
@@ -231,27 +265,117 @@ impl<'de> serde::Deserialize<'de> for Directory {
 	}
 }
 
-#[derive(Serialize, Deserialize, Eq, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone)]
 pub struct DirectoryHistory {
 	pub id: ID,
 	pub action: DirectoryHistoryAction,
 }
 
-#[derive(Serialize, Deserialize, Eq, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone)]
 pub enum DirectoryHistoryAction {
 	Add,
 	Remove,
 }
 
-#[derive(Serialize, Deserialize, Eq, PartialEq, Debug)]
+#[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone)]
 pub enum DatabaseObject {
 	Entry(Entry),
 	Directory(Directory),
 }
 
+impl DatabaseObject {
+	pub fn get_id(&self) -> &ID {
+		match self {
+			&DatabaseObject::Entry(ref e) => e.get_id(),
+			&DatabaseObject::Directory(ref d) => d.get_id(),
+		}
+	}
+}
+
+
+// We wrap HashMap to enforce some invariants.
+// The HashMap should never be modified directly; all modifications are performed through this wrapper.
+// This allows us to enforce important invariants.  For example, by enforcing that the ID of the DatabaseObject always matches
+// the key in the HashMap, we can ensure that the DatabaseObject's internal invariants are respected.
+// This is because it's not possible to directly modify the ID of an object.  So the only way to update objects in the database is to
+// either grab a mutable reference to it or use this struct's update function to "replace" the object.  In the former case,
+// the DatabaseObject enforces its own invariants itself.  In the latter case you can only replace an object with a clone of itself,
+// otherwise the IDs wouldn't match, so again it can enforce its own invariants.
+// All of this ensures DatabaseObject's invariants are respected.
+// Most important, DatabaseObject's ensure their history is never destructively modified; so we can be sure, through these APIs,
+// that user data is always perserved.
+// NOTE: It's of course possible to maliciously invalidate these invariants by, for example,
+// serializing a DatabaseObject, modifying the serialized representation, and then Deserializing,
+// but the point is to make it difficult and unnatural to bypass the invariants; it shouldn't
+// happen accidentally.
+#[derive(Eq, PartialEq, Debug)]
+struct DatabaseObjectMap {
+	inner: HashMap<ID, DatabaseObject>,
+}
+
+impl DatabaseObjectMap {
+	pub fn new() -> DatabaseObjectMap {
+		DatabaseObjectMap {
+			inner: HashMap::new(),
+		}
+	}
+
+	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&DatabaseObject>
+		where Q: Hash + Eq,
+			  ID: Borrow<Q>
+	{
+		self.inner.get(key)
+	}
+
+	pub fn get_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<&mut DatabaseObject>
+		where Q: Hash + Eq,
+		      ID: Borrow<Q>
+	{
+		self.inner.get_mut(key)
+	}
+
+	pub fn len(&self) -> usize {
+		self.inner.len()
+	}
+
+	// Update an object in the map (or insert if it didn't already exist)
+	pub fn update(&mut self, object: DatabaseObject) {
+		self.inner.insert(object.get_id().clone(), object);
+	}
+}
+
+impl serde::Serialize for DatabaseObjectMap {
+	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+		where S: serde::Serializer
+	{
+		let ordered: BTreeMap<_, _> = self.inner.iter().collect();
+		ordered.serialize(serializer)
+	}
+}
+
+impl<'de> serde::Deserialize<'de> for DatabaseObjectMap {
+	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+		where D: serde::Deserializer<'de>
+	{
+		Ok(DatabaseObjectMap {
+			inner: HashMap::deserialize(deserializer)?,
+		})
+	}
+}
+
+impl<'a> IntoIterator for &'a DatabaseObjectMap {
+	type Item = (&'a ID, &'a DatabaseObject);
+	type IntoIter = std::collections::hash_map::Iter<'a, ID, DatabaseObject>;
+
+	fn into_iter(self) -> std::collections::hash_map::Iter<'a, ID, DatabaseObject> {
+		self.inner.iter()
+	}
+}
+
+
 #[derive(Serialize, Eq, PartialEq, Debug)]
 pub struct Database {
-	objects: HashMap<ID, DatabaseObject>,
+	objects: DatabaseObjectMap,
 	root_directory: ID,
 
 	master_key: Option<MasterKey>,
@@ -269,9 +393,9 @@ impl Database {
 		let master_key = None;  //TODO: MasterKey::derive(username, password);
 
 		let root = Directory::new();
-		let root_directory = root.id;
-		let mut objects = HashMap::new();
-		objects.insert(root.id, DatabaseObject::Directory(root));
+		let root_directory = root.get_id().clone();
+		let mut objects = DatabaseObjectMap::new();
+		objects.update(DatabaseObject::Directory(root));
 
 		Database {
 			objects: objects,
@@ -309,7 +433,7 @@ impl Database {
 
 	pub fn add_entry(&mut self, entry: Entry) {
 		self.get_root_mut().add(entry.id);
-		self.objects.insert(entry.id, DatabaseObject::Entry(entry));
+		self.objects.update(DatabaseObject::Entry(entry));
 	}
 
 	pub fn get_entry_by_id(&self, id: &ID) -> Option<&Entry> {
@@ -338,11 +462,11 @@ impl Database {
 	}
 
 	pub fn load_from_path<P: AsRef<Path>>(path: P, password: &[u8]) -> io::Result<Database> {
-		// This struct is needed because Database has a field that isn't part of
+		// This struct is needed because Database has fields that aren't part of
 		// serialization, but can't implement Default.
 		#[derive(Deserialize)]
 		struct SerializableDatabase {
-			objects: HashMap<ID, DatabaseObject>,
+			objects: DatabaseObjectMap,
 			root_directory: ID,
 			master_key: Option<MasterKey>,
 		}
@@ -411,7 +535,7 @@ pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: b
 
 #[cfg(test)]
 mod tests {
-	use super::{Database, random_string, Entry, EntryHistory, ID};
+	use super::{Database, DatabaseObject, Directory, random_string, Entry, EntryHistory, ID, serde_json};
 	use rand::{OsRng, Rng};
 	use std::collections::HashMap;
 	use tempdir::TempDir;
@@ -633,6 +757,7 @@ mod tests {
 		db.add_entry(entry);
 
 		let mut entry = Entry::new();
+		let tmp_entry_id = entry.get_id().clone();
 		entry.edit(EntryHistory::new(HashMap::new()));
 		entry.edit(EntryHistory::new([
 			("title".to_string(), "Test test".to_string()),
@@ -644,6 +769,9 @@ mod tests {
 			("password".to_string(), "Password".to_string()),
 			].iter().cloned().collect()));
 		db.add_entry(entry);
+
+		db.get_root_mut().remove(tmp_entry_id.clone());
+		db.get_root_mut().add(tmp_entry_id.clone());
 
 		// Save
 		db.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
@@ -699,6 +827,100 @@ mod tests {
 				}
 			}
 		}
+	}
+
+	// Test to make sure serialization is fully deterministic (the same database object serializes to the same string every time)
+	#[test]
+	fn entry_deterministic_serialization() {
+		// Create entry
+		let mut entry = Entry::new();
+		entry.edit(EntryHistory::new(HashMap::new()));
+		entry.edit(EntryHistory::new([
+			("title".to_string(), "Serialization".to_string()),
+			("username".to_string(), "Foo".to_string()),
+			("password".to_string(), "password".to_string()),
+			("url".to_string(), "Url".to_string()),
+			].iter().cloned().collect()));
+		entry.edit(EntryHistory::new([
+			("title".to_string(), "Title change".to_string()),
+			("url".to_string(), "Url change".to_string()),
+			].iter().cloned().collect()));
+
+		let object = DatabaseObject::Entry(entry);
+
+		// Serialize
+		let serialized = serde_json::to_string(&object).unwrap();
+
+		// Serialize a number of times to ensure it is always the same
+		for _ in 0..64 {
+			// We deserialize into a new copy to force internal HashMap rngs to re-randomize.
+			let copy: DatabaseObject = serde_json::from_str(&serialized).unwrap();
+
+			let other = serde_json::to_string(&copy).unwrap();
+
+			assert_eq!(serialized, other);
+		}
+	}
+
+	// Test to make sure serialization is fully deterministic (the same database object serializes to the same string every time)
+	#[test]
+	fn directory_deterministic_serialization() {
+		let mut rng = OsRng::new().expect("OsRng failed to initialize");
+
+		// Create directory
+		let mut directory = Directory::new();
+
+		let id1: ID = rng.gen();
+		let id2: ID = rng.gen();
+		let id3: ID = rng.gen();
+
+		directory.add(id1.clone());
+		directory.add(id2.clone());
+		directory.add(id3.clone());
+		directory.remove(id2.clone());
+		directory.remove(id3.clone());
+		directory.add(id2.clone());
+
+		let object = DatabaseObject::Directory(directory);
+
+		// Serialize
+		let serialized = serde_json::to_string(&object).unwrap();
+
+		// Serialize a number of times to ensure it is always the same
+		for _ in 0..64 {
+			// We deserialize into a new copy to force internal HashMap rngs to re-randomize.
+			let copy: DatabaseObject = serde_json::from_str(&serialized).unwrap();
+
+			let other = serde_json::to_string(&copy).unwrap();
+
+			assert_eq!(serialized, other);
+		}
+	}
+
+	// This test makes sure that the way we test hashmap is confirms non-determinism, so we know the deterministic_serialization test will work properly.
+	#[test]
+	fn hashmap_is_not_deterministic() {
+		let mut hashmap: HashMap<&str, &str> = HashMap::new();
+
+		hashmap.insert("foo", "bar");
+		hashmap.insert("dog", "cat");
+		hashmap.insert("excel", "determinism");
+		hashmap.insert("you", "random");
+
+		let serialized = serde_json::to_string(&hashmap).unwrap();
+		let mut differ = false;
+
+		for _ in 0..64 {
+			// Need to deserialize into a new copy so we "re-initalize" the HashMap's Rng.
+			let deserialized: HashMap<String, String> = serde_json::from_str(&serialized).unwrap();
+
+			if serialized != serde_json::to_string(&deserialized).unwrap() {
+				differ = true;
+				break;
+			}
+		}
+
+		assert_eq!(differ, true);
 	}
 
 	// TODO: Test all the failure modes of opening a database
