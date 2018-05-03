@@ -484,9 +484,9 @@ mod tests {
 		let id: [u8; 32] = rng.gen();
 		let bad_id: [u8; 32] = rng.gen();
 		let data = rng.gen_iter::<u8>().take(1034).collect::<Vec<u8>>();
-		let salt_key: Key = rng.gen();// Key::from_rng(&mut rng);
-		let mac_key = Key::from_rng(&mut rng);
-		let encryption_key = Key::from_rng(&mut rng);
+		let salt_key: Key = rng.gen();
+		let mac_key: Key = rng.gen();
+		let encryption_key: Key = rng.gen();
 
 		let (ciphertext, mac) = deterministic_encryption(&id, &data, &salt_key, &mac_key, &encryption_key);
 		let mut ciphertext_and_mac = ciphertext.clone();
