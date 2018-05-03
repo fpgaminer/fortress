@@ -102,13 +102,14 @@ impl NetworkKeySuite {
 	}
 
 	// Deterministically encrypt data, returning (ciphertext, mac)
-	pub fn encrypt_object(&self, data: &[u8]) -> (Vec<u8>, Vec<u8>) {
-		deterministic_encryption(data, &self.salt_key, &self.mac_key, &self.encryption_key)
+	// ID is included in the MAC calculation, but not in the ciphertext; useful for ensuring the server can't swap object data around.
+	pub fn encrypt_object(&self, id: &[u8], data: &[u8]) -> (Vec<u8>, Vec<u8>) {
+		deterministic_encryption(id, data, &self.salt_key, &self.mac_key, &self.encryption_key)
 	}
 
 	// Deterministically decrypt payload, after validating mac.  Returns plaintext.
-	pub fn decrypt_object(&self, payload: &[u8]) -> io::Result<Vec<u8>> {
-		deterministic_decryption(payload, &self.mac_key, &self.encryption_key)
+	pub fn decrypt_object(&self, id: &[u8], payload: &[u8]) -> io::Result<Vec<u8>> {
+		deterministic_decryption(id, payload, &self.mac_key, &self.encryption_key)
 	}
 }
 
@@ -136,14 +137,14 @@ impl FileKeySuite {
 
 	// Deterministically encrypt data, returning ciphertext+mac
 	fn encrypt_object(&self, data: &[u8]) -> Vec<u8> {
-		let (mut ciphertext, mut mac) = deterministic_encryption(data, &self.salt_key, &self.mac_key, &self.encryption_key);
+		let (mut ciphertext, mut mac) = deterministic_encryption(&[], data, &self.salt_key, &self.mac_key, &self.encryption_key);
 		ciphertext.append(&mut mac);
 		ciphertext
 	}
 
 	// Deterministically decrypt ciphertext, after validating mac.  Returns plaintext.
 	fn decrypt_object(&self, data: &[u8]) -> io::Result<Vec<u8>> {
-		deterministic_decryption(data, &self.mac_key, &self.encryption_key)
+		deterministic_decryption(&[], data, &self.mac_key, &self.encryption_key)
 	}
 }
 
@@ -288,7 +289,8 @@ fn derive_deterministic_encryption_key(encryption_key: &Key, salt: &[u8]) -> Key
 // Finally, we append a MAC.
 // The result is salt+ciphertext+mac.
 // During decryption we validate the MAC first, which prevents attackers from manipulating our algorithm.
-fn deterministic_encryption(plaintext: &[u8], salt_key: &Key, mac_key: &Key, encryption_key: &Key) -> (Vec<u8>, Vec<u8>) {
+// id is included in the MAC calculation, but it is not included as part of ciphertext.
+fn deterministic_encryption(id: &[u8], plaintext: &[u8], salt_key: &Key, mac_key: &Key, encryption_key: &Key) -> (Vec<u8>, Vec<u8>) {
 	let salt = hmac(salt_key, plaintext).code().to_vec();
 	let salted_encryption_key = derive_deterministic_encryption_key(encryption_key, &salt);
 	let mut ciphertext = chacha20_process(&salted_encryption_key, plaintext);
@@ -297,7 +299,12 @@ fn deterministic_encryption(plaintext: &[u8], salt_key: &Key, mac_key: &Key, enc
 	result.extend_from_slice(&salt);
 	result.append(&mut ciphertext);
 
-	let mac = hmac(mac_key, &result).code().to_vec();
+	let mac = {
+		let mut hmac = Hmac::new(Sha256::new(), &mac_key[..]);
+		hmac.input(id);
+		hmac.input(&result);
+		hmac.result().code().to_vec()
+	};
 
 	(result, mac)
 }
@@ -305,14 +312,19 @@ fn deterministic_encryption(plaintext: &[u8], salt_key: &Key, mac_key: &Key, enc
 
 // Refer to deterministic_encryption for the scheme used here.
 // Returns the plaintext or an error (MAC failure).
-fn deterministic_decryption(payload: &[u8], mac_key: &Key, encryption_key: &Key) -> io::Result<Vec<u8>> {
+fn deterministic_decryption(id: &[u8], payload: &[u8], mac_key: &Key, encryption_key: &Key) -> io::Result<Vec<u8>> {
 	if payload.len() < 64 {
 		return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "missing mac tag or salt"));
 	}
 
 	let salt_and_ciphertext = &payload[..payload.len()-32];
 	let mac = MacResult::new(&payload[payload.len()-32..]);
-	let calculated_mac = hmac(mac_key, salt_and_ciphertext);
+	let calculated_mac = {
+		let mut hmac = Hmac::new(Sha256::new(), &mac_key[..]);
+		hmac.input(id);
+		hmac.input(salt_and_ciphertext);
+		hmac.result()
+	};
 
 	if calculated_mac != mac {
 		return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "invalid mac tag"));
@@ -398,18 +410,17 @@ mod tests {
 	#[test]
 	fn test_deterministic_encryption() {
 		let mut rng = OsRng::new().expect("OsRng failed to initialize");
+		let id: [u8; 32] = rng.gen();
 		let data = rng.gen_iter::<u8>().take(1034).collect::<Vec<u8>>();
 		let salt_key = Key::from_rng(&mut rng);
 		let mac_key = Key::from_rng(&mut rng);
 		let encryption_key = Key::from_rng(&mut rng);
 
-		let (ciphertext, mac) = deterministic_encryption(&data, &salt_key, &mac_key, &encryption_key);
-		let (ciphertext2, mac2) = deterministic_encryption(&data, &salt_key, &mac_key, &encryption_key);
-		let mut ciphertext_and_mac = Vec::new();
-		ciphertext_and_mac.extend_from_slice(&ciphertext);
-		ciphertext_and_mac.extend_from_slice(&mac);
+		let (ciphertext, mac) = deterministic_encryption(&id, &data, &salt_key, &mac_key, &encryption_key);
+		let (ciphertext2, mac2) = deterministic_encryption(&id, &data, &salt_key, &mac_key, &encryption_key);
+		let mut ciphertext_and_mac = [&ciphertext[..], &mac[..]].concat();
 
-		let plaintext = deterministic_decryption(&ciphertext_and_mac, &mac_key, &encryption_key).unwrap();
+		let plaintext = deterministic_decryption(&id, &ciphertext_and_mac, &mac_key, &encryption_key).unwrap();
 
 		assert_eq!(plaintext, data);
 		assert_eq!(ciphertext, ciphertext2);
@@ -418,7 +429,7 @@ mod tests {
 		// Make sure it really is using a different key for different data
 		let mut data2 = data.clone();
 		data2[data.len()-1] ^= 1;
-		let (ciphertext3, mac3) = deterministic_encryption(&data2, &salt_key, &mac_key, &encryption_key);
+		let (ciphertext3, mac3) = deterministic_encryption(&id, &data2, &salt_key, &mac_key, &encryption_key);
 
 		assert_ne!(ciphertext, ciphertext3);
 		assert_ne!(mac, mac3);
@@ -428,7 +439,7 @@ mod tests {
 		// Make sure it is verifying the mac
 		ciphertext_and_mac[60] ^= 1;
 
-		assert!(deterministic_decryption(&ciphertext_and_mac, &mac_key, &encryption_key).is_err());
+		assert!(deterministic_decryption(&id, &ciphertext_and_mac, &mac_key, &encryption_key).is_err());
 	}
 
 	// Sanity check to make sure we didn't typo any of the key derivations.
@@ -464,5 +475,27 @@ mod tests {
 				assert_ne!(keys[i], keys[j]);
 			}
 		}
+	}
+
+	// Test to make sure that ID is authenticated
+	#[test]
+	fn test_id_is_authenticated() {
+		let mut rng = OsRng::new().expect("OsRng failed to initialize");
+		let id: [u8; 32] = rng.gen();
+		let bad_id: [u8; 32] = rng.gen();
+		let data = rng.gen_iter::<u8>().take(1034).collect::<Vec<u8>>();
+		let salt_key: Key = rng.gen();// Key::from_rng(&mut rng);
+		let mac_key = Key::from_rng(&mut rng);
+		let encryption_key = Key::from_rng(&mut rng);
+
+		let (ciphertext, mac) = deterministic_encryption(&id, &data, &salt_key, &mac_key, &encryption_key);
+		let mut ciphertext_and_mac = ciphertext.clone();
+		ciphertext_and_mac.extend_from_slice(&mac);
+
+		let plaintext = deterministic_decryption(&id, &ciphertext_and_mac, &mac_key, &encryption_key).unwrap();
+
+		assert_eq!(plaintext, data);
+
+		assert!(deterministic_decryption(&bad_id, &ciphertext_and_mac, &mac_key, &encryption_key).is_err());
 	}
 }
