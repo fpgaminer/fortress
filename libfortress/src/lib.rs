@@ -278,6 +278,7 @@ pub enum DirectoryHistoryAction {
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone)]
+#[serde(tag = "type")]
 pub enum DatabaseObject {
 	Entry(Entry),
 	Directory(Directory),
