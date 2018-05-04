@@ -79,6 +79,14 @@ macro_rules! newtype_traits (($newtype:ident, $len:expr) => (
         }
     }
 
+	impl<'a, 'b> ::std::cmp::PartialEq<$newtype> for &'b $newtype {
+		fn eq(&self, &$newtype(ref other): &$newtype) -> bool {
+			use crypto::util::fixed_time_eq;
+			let &&$newtype(ref this) = self;
+			fixed_time_eq(this, other)
+		}
+	}
+
     impl ::std::cmp::Eq for $newtype {}
 
 	impl ::serde::Serialize for $newtype {
