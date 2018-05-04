@@ -28,6 +28,10 @@ impl Directory {
 		&self.id
 	}
 
+	pub fn get_history(&self) -> &[DirectoryHistory] {
+		&self.history
+	}
+
 	pub fn add(&mut self, id: ID) {
 		self.entries.insert(id);
 		self.history.push(DirectoryHistory {

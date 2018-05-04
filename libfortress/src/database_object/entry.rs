@@ -54,7 +54,7 @@ impl Entry {
 		self.state.get(key)
 	}
 
-	pub fn get_history(&self) -> &Vec<EntryHistory> {
+	pub fn get_history(&self) -> &[EntryHistory] {
 		&self.history
 	}
 
