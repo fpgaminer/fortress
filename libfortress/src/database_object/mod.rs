@@ -1,7 +1,7 @@
 mod directory;
 mod entry;
 
-pub use self::directory::Directory;
+pub use self::directory::{Directory, DirectoryHistoryAction};
 pub use self::entry::{Entry, EntryHistory};
 
 use super::ID;
