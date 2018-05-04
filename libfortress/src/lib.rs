@@ -1,3 +1,18 @@
+// Methodology Note:
+// This library enforces invariants by using Rust's visibility rules.
+// For example one major feature of most types in this library is
+// non-destructive editing.  Editing an Entry, for example, simply appends
+// to its history, rather than destructively modifying it.  This invariant is
+// enforced by making all properties of the struct private and forcing access
+// through getters/setters and other public methods.
+// Even within this library itself these rules are enforced to prevent mistakes
+// by placing Entry in a sub-module so that other modules cannot mistakenly
+// access private properties of the struct.
+//
+// The goal of this library is for users to be confident that, no matter what, data
+// stored in the Database is never unintentionally lost.  By using this methodogly
+// of enforcing non-destructive and other invariants we can drastically reduce
+// the probability of bugs violating this intentions.
 extern crate rand;
 extern crate time;
 #[macro_use]
@@ -11,366 +26,24 @@ extern crate tempdir;
 pub extern crate fortresscrypto;
 
 #[macro_use] mod newtype_macros;
+mod database_object;
+mod database_object_map;
+
+pub use database_object::{Directory, Entry, EntryHistory};
 
 use rand::{OsRng, Rng};
-use std::collections::{HashSet, HashMap, BTreeMap};
+use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, BufReader, BufWriter};
 use std::path::Path;
 use std::str;
-use std::hash::Hash;
-use std::ops::Index;
-use std::borrow::Borrow;
 use fortresscrypto::{MasterKey, EncryptionParameters, FileKeySuite};
+use database_object::DatabaseObject;
+use database_object_map::DatabaseObjectMap;
 
 
 new_type!{
 	public ID(32);
-}
-
-
-#[derive(Serialize, Eq, PartialEq, Debug, Clone)]
-pub struct Entry {
-	id: ID,
-	history: Vec<EntryHistory>,
-	time_created: i64,
-
-	// The current state of the entry
-	#[serde(skip_serializing, skip_deserializing)]
-	state: HashMap<String, String>,
-}
-
-impl Entry {
-	pub fn new() -> Entry {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-
-		Entry::inner_new(rng.gen(), Vec::new(), time::now_utc().to_timespec().sec)
-	}
-
-	fn inner_new(id: ID, history: Vec<EntryHistory>, time_created: i64) -> Entry {
-		Entry {
-			id: id,
-			history: history,
-			time_created: time_created,
-
-			state: HashMap::new(),
-		}
-	}
-
-	// Keeping fields private and providing getters makes these fields readonly to the outside world.
-	pub fn get_id(&self) -> &ID {
-		&self.id
-	}
-
-	pub fn get_time_created(&self) -> i64 {
-		self.time_created
-	}
-
-	pub fn get_state(&self) -> &HashMap<String, String> {
-		&self.state
-	}
-
-	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&String>
-		where Q: Hash + Eq,
-			  String: Borrow<Q>
-	{
-		self.state.get(key)
-	}
-
-	pub fn get_history(&self) -> &Vec<EntryHistory> {
-		&self.history
-	}
-
-	pub fn edit(&mut self, mut new_data: EntryHistory) {
-		// Remove any fields from the EntryHistory if they don't actually cause any changes to our state
-		new_data.data.retain(|k, v| self.state.get(k) != Some(v));
-
-		self.apply_history(&new_data);
-		self.history.push(new_data);
-	}
-
-	// Used internally to apply an EntryHistory on top of this object's current state.
-	fn apply_history(&mut self, new_data: &EntryHistory) {
-		for (key, value) in &new_data.data {
-			self.state.insert(key.to_string(), value.to_string());
-		}
-	}
-}
-
-impl<'a, Q: ?Sized> Index<&'a Q> for Entry
-	where Q: Eq + Hash,
-		  String: Borrow<Q>
-{
-	type Output = String;
-
-	#[inline]
-	fn index(&self, key: &Q) -> &String {
-		self.get(key).expect("no entry found for key")
-	}
-}
-
-impl<'de> serde::Deserialize<'de> for Entry {
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-	where
-		D: serde::Deserializer<'de>,
-	{
-		#[derive(Deserialize)]
-		struct PartialDeserialized {
-			id: ID,
-			history: Vec<EntryHistory>,
-			time_created: i64,
-		}
-
-		let entry: PartialDeserialized = serde::Deserialize::deserialize(deserializer)?;
-		let history = entry.history.clone();
-		let mut entry = Entry::inner_new(entry.id, entry.history, entry.time_created);
-
-		// Re-construct current state from history
-		for history in &history {
-			entry.apply_history(history);
-		}
-
-		Ok(entry)
-	}
-}
-
-
-#[derive(Clone, Serialize, Deserialize, Eq, PartialEq, Debug)]
-pub struct EntryHistory {
-	pub time: i64,
-	#[serde(serialize_with = "ordered_map")]
-	pub data: HashMap<String, String>,
-}
-
-impl EntryHistory {
-	pub fn new(data: HashMap<String, String>) -> EntryHistory {
-		EntryHistory {
-			time: time::now_utc().to_timespec().sec,
-			data: data,
-		}
-	}
-
-	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&String>
-		where Q: Hash + Eq,
-			  String: Borrow<Q>
-	{
-		self.data.get(key)
-	}
-}
-
-impl<'a, Q: ?Sized> Index<&'a Q> for EntryHistory
-	where Q: Eq + Hash,
-		  String: Borrow<Q>
-{
-	type Output = String;
-
-	#[inline]
-	fn index(&self, key: &Q) -> &String {
-		self.get(key).expect("no entry found for key")
-	}
-}
-
-// We have to use this so that the serialization for EntryHistory is deterministic (always the same for the same input).
-// If we didn't, the serialized form would change each time, which would cause problems for synchronization.
-fn ordered_map<S, K, V>(value: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
-	where S: serde::Serializer,
-	      K: Eq + Hash + Ord + serde::Serialize,
-		  V: serde::Serialize
-{
-	use serde::Serialize;
-
-	let ordered: BTreeMap<_, _> = value.iter().collect();
-	ordered.serialize(serializer)
-}
-
-// A directory is a list of references to Entries and Directories, much like a filesystem directory.
-#[derive(Serialize, Eq, PartialEq, Debug, Clone)]
-pub struct Directory {
-	id: ID,
-	history: Vec<DirectoryHistory>,
-
-	#[serde(skip_serializing)]
-	pub entries: HashSet<ID>,
-}
-
-impl Directory {
-	pub fn new() -> Directory {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-
-		Directory {
-			id: rng.gen(),
-			entries: HashSet::new(),
-			history: Vec::new(),
-		}
-	}
-
-	pub fn get_id(&self) -> &ID {
-		&self.id
-	}
-
-	pub fn add(&mut self, id: ID) {
-		self.entries.insert(id);
-		self.history.push(DirectoryHistory {
-			id: id,
-			action: DirectoryHistoryAction::Add,
-		});
-	}
-
-	pub fn remove(&mut self, id: ID) {
-		if !self.entries.remove(&id) {
-			panic!("Attempt to remove an ID from directory that doesn't exist");
-		}
-
-		self.history.push(DirectoryHistory {
-			id: id,
-			action: DirectoryHistoryAction::Remove,
-		});
-	}
-
-	// List all Entry entries in this directory
-	pub fn list_entries<'a>(&'a self, database: &Database) -> Vec<&'a ID> {
-		self.entries.iter().filter(|id| {
-			database.get_entry_by_id(id).is_some()
-		}).collect()
-	}
-}
-
-impl<'de> serde::Deserialize<'de> for Directory {
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-	where
-		D: serde::Deserializer<'de>,
-	{
-		#[derive(Deserialize)]
-		struct DirectoryDeserialized {
-			id: ID,
-			history: Vec<DirectoryHistory>,
-		}
-
-		let d: DirectoryDeserialized = serde::Deserialize::deserialize(deserializer)?;
-		let mut entries = HashSet::new();
-
-		// Re-construct current state from history
-		for history in &d.history {
-			match history.action {
-				DirectoryHistoryAction::Add => entries.insert(history.id),
-				DirectoryHistoryAction::Remove => entries.remove(&history.id),
-			};
-		}
-
-		Ok(Directory {
-			id: d.id,
-			entries: entries,
-			history: d.history,
-		})
-	}
-}
-
-#[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone)]
-pub struct DirectoryHistory {
-	pub id: ID,
-	pub action: DirectoryHistoryAction,
-}
-
-#[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone)]
-pub enum DirectoryHistoryAction {
-	Add,
-	Remove,
-}
-
-#[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone)]
-#[serde(tag = "type")]
-pub enum DatabaseObject {
-	Entry(Entry),
-	Directory(Directory),
-}
-
-impl DatabaseObject {
-	pub fn get_id(&self) -> &ID {
-		match self {
-			&DatabaseObject::Entry(ref e) => e.get_id(),
-			&DatabaseObject::Directory(ref d) => d.get_id(),
-		}
-	}
-}
-
-
-// We wrap HashMap to enforce some invariants.
-// The HashMap should never be modified directly; all modifications are performed through this wrapper.
-// This allows us to enforce important invariants.  For example, by enforcing that the ID of the DatabaseObject always matches
-// the key in the HashMap, we can ensure that the DatabaseObject's internal invariants are respected.
-// This is because it's not possible to directly modify the ID of an object.  So the only way to update objects in the database is to
-// either grab a mutable reference to it or use this struct's update function to "replace" the object.  In the former case,
-// the DatabaseObject enforces its own invariants itself.  In the latter case you can only replace an object with a clone of itself,
-// otherwise the IDs wouldn't match, so again it can enforce its own invariants.
-// All of this ensures DatabaseObject's invariants are respected.
-// Most important, DatabaseObject's ensure their history is never destructively modified; so we can be sure, through these APIs,
-// that user data is always perserved.
-// NOTE: It's of course possible to maliciously invalidate these invariants by, for example,
-// serializing a DatabaseObject, modifying the serialized representation, and then Deserializing,
-// but the point is to make it difficult and unnatural to bypass the invariants; it shouldn't
-// happen accidentally.
-#[derive(Eq, PartialEq, Debug)]
-struct DatabaseObjectMap {
-	inner: HashMap<ID, DatabaseObject>,
-}
-
-impl DatabaseObjectMap {
-	pub fn new() -> DatabaseObjectMap {
-		DatabaseObjectMap {
-			inner: HashMap::new(),
-		}
-	}
-
-	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&DatabaseObject>
-		where Q: Hash + Eq,
-			  ID: Borrow<Q>
-	{
-		self.inner.get(key)
-	}
-
-	pub fn get_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<&mut DatabaseObject>
-		where Q: Hash + Eq,
-		      ID: Borrow<Q>
-	{
-		self.inner.get_mut(key)
-	}
-
-	pub fn len(&self) -> usize {
-		self.inner.len()
-	}
-
-	// Update an object in the map (or insert if it didn't already exist)
-	pub fn update(&mut self, object: DatabaseObject) {
-		self.inner.insert(object.get_id().clone(), object);
-	}
-}
-
-impl serde::Serialize for DatabaseObjectMap {
-	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-		where S: serde::Serializer
-	{
-		let ordered: BTreeMap<_, _> = self.inner.iter().collect();
-		ordered.serialize(serializer)
-	}
-}
-
-impl<'de> serde::Deserialize<'de> for DatabaseObjectMap {
-	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-		where D: serde::Deserializer<'de>
-	{
-		Ok(DatabaseObjectMap {
-			inner: HashMap::deserialize(deserializer)?,
-		})
-	}
-}
-
-impl<'a> IntoIterator for &'a DatabaseObjectMap {
-	type Item = (&'a ID, &'a DatabaseObject);
-	type IntoIter = std::collections::hash_map::Iter<'a, ID, DatabaseObject>;
-
-	fn into_iter(self) -> std::collections::hash_map::Iter<'a, ID, DatabaseObject> {
-		self.inner.iter()
-	}
 }
 
 
@@ -433,7 +106,7 @@ impl Database {
 	}
 
 	pub fn add_entry(&mut self, entry: Entry) {
-		self.get_root_mut().add(entry.id);
+		self.get_root_mut().add(entry.get_id().clone());
 		self.objects.update(DatabaseObject::Entry(entry));
 	}
 
@@ -808,20 +481,20 @@ mod tests {
 
 			match title.map(|t| t.as_str()) {
 				Some("Forgot this one") => {
-					assert_eq!(entry.history.len(), 2);
-					assert_eq!(entry.history[0].data.len(), 0);
+					assert_eq!(entry.get_history().len(), 2);
+					assert_eq!(entry.get_history()[0].data.len(), 0);
 				},
 				Some("Test test") => {
 					assert_eq!(entry.get("username").unwrap(), "Username");
-					assert_eq!(entry.history.len(), 2);
+					assert_eq!(entry.get_history().len(), 2);
 				},
 				Some("Ooops") => {
 					assert_eq!(entry["username"], "Username");
 					assert_eq!(entry.get_state()["password"], "Password");
-					assert_eq!(entry.history[0].data.len(), 0);
-					assert_eq!(entry.history[1].data["username"], "Username");
-					assert_eq!(entry.history[2].data.get("username"), None);
-					assert_eq!(entry.history[1]["title"], "Test test");
+					assert_eq!(entry.get_history()[0].data.len(), 0);
+					assert_eq!(entry.get_history()[1].data["username"], "Username");
+					assert_eq!(entry.get_history()[2].data.get("username"), None);
+					assert_eq!(entry.get_history()[1]["title"], "Test test");
 				}
 				_ => {
 					panic!("Unknown title");
