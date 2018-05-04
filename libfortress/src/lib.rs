@@ -13,6 +13,15 @@
 // stored in the Database is never unintentionally lost.  By using this methodogly
 // of enforcing non-destructive and other invariants we can drastically reduce
 // the probability of bugs violating this intentions.
+// 
+// 
+// NOTE: Changing any of these structs which derive Serialize/Deserialize requires
+// bumping the database format version.
+// 
+// NOTE: No versioning is currently included for cloud objects.  The plan is to
+// add versioning the next time the format changes, and to change the way the 
+// network and login keys are calculated to prevent old versions from syncing.
+// We can then have a plan for more graceful versioning going forward.
 extern crate rand;
 extern crate time;
 #[macro_use]
