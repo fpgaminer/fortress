@@ -454,7 +454,7 @@ impl App {
 
 		match self.state {
 			AppState::OpenDatabasePassword => {
-				self.database = Some(libfortress::Database::load_from_path(self.database_path.as_ref().unwrap(), password.as_bytes()).unwrap());
+				self.database = Some(libfortress::Database::load_from_path(self.database_path.as_ref().unwrap(), password).unwrap());
 
 				self.state = AppState::ViewDatabase;
 				self.update();
@@ -475,7 +475,8 @@ impl App {
 				if response == ok {
 					if let Some(file) = dialog.get_filename() {
 						let path = PathBuf::from(file);
-						let database = libfortress::Database::new_with_password(password.as_bytes());
+						// TODO: Username
+						let database = libfortress::Database::new_with_password("", password);
 						database.save_to_path(&path).unwrap();
 						self.database = Some(database);
 						self.database_path = Some(path);
@@ -493,7 +494,8 @@ impl App {
 				dialog.destroy();
 			},
 			AppState::ChangePassword => {
-				self.database.as_mut().unwrap().change_password(password.as_bytes());
+				let username = self.database.as_ref().unwrap().get_username().to_string();
+				self.database.as_mut().unwrap().change_password(username, password);
 				self.database.as_ref().unwrap().save_to_path(self.database_path.as_ref().unwrap()).unwrap();
 
 				self.state = AppState::Menu;

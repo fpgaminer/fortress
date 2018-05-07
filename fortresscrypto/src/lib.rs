@@ -84,6 +84,7 @@ pub fn hash_username_for_login(username: &[u8]) -> Vec<u8> {
 }
 
 
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub struct NetworkKeySuite {
 	salt_key: Key,
 	mac_key: Key,

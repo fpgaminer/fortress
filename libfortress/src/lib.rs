@@ -37,6 +37,7 @@ pub extern crate fortresscrypto;
 #[macro_use] mod newtype_macros;
 mod database_object;
 mod database_object_map;
+mod sync_parameters;
 
 pub use database_object::{Directory, Entry, EntryHistory};
 
@@ -46,9 +47,10 @@ use std::fs::File;
 use std::io::{self, BufReader, BufWriter};
 use std::path::Path;
 use std::str;
-use fortresscrypto::{MasterKey, EncryptionParameters, FileKeySuite};
+use fortresscrypto::{EncryptionParameters, FileKeySuite};
 use database_object::DatabaseObject;
 use database_object_map::DatabaseObjectMap;
+use sync_parameters::SyncParameters;
 
 
 new_type!{
@@ -61,7 +63,7 @@ pub struct Database {
 	objects: DatabaseObjectMap,
 	root_directory: ID,
 
-	master_key: Option<MasterKey>,
+	sync_parameters: SyncParameters,
 
 	#[serde(skip_serializing, skip_deserializing)]
 	encryption_parameters: EncryptionParameters,
@@ -70,10 +72,15 @@ pub struct Database {
 }
 
 impl Database {
-	pub fn new_with_password(password: &[u8]) -> Database {
+	pub fn new_with_password<U: AsRef<str>, P: AsRef<str>>(username: U, password: P) -> Database {
+		let username = username.as_ref();
+		let password = password.as_ref();
+
 		let encryption_parameters = Default::default();
-		let file_key_suite = FileKeySuite::derive(password, &encryption_parameters);
-		let master_key = None;  //TODO: MasterKey::derive(username, password);
+		let file_key_suite = FileKeySuite::derive(password.as_bytes(), &encryption_parameters);
+
+		// TODO: Derive in a background thread
+		let sync_parameters = SyncParameters::new(username, password);
 
 		let root = Directory::new();
 		let root_directory = root.get_id().clone();
@@ -83,16 +90,29 @@ impl Database {
 		Database {
 			objects: objects,
 			root_directory: root_directory,
-			master_key: master_key,
+			sync_parameters: sync_parameters,
+
 			encryption_parameters: encryption_parameters,
 			file_key_suite: file_key_suite,
 		}
 	}
 
-	pub fn change_password(&mut self, password: &[u8]) {
+	pub fn change_password<A: AsRef<str>, B: AsRef<str>>(&mut self, username: A, password: B) {
+		let username = username.as_ref();
+		let password = password.as_ref();
+
 		self.encryption_parameters = Default::default();
-		self.file_key_suite = FileKeySuite::derive(password, &self.encryption_parameters);
-		self.master_key = None;  // TODO: Derive
+		self.file_key_suite = FileKeySuite::derive(password.as_bytes(), &self.encryption_parameters);
+
+		// TODO: Derive in a background thread
+		self.sync_parameters = SyncParameters::new(username, password);
+
+		// TODO: Need to tell server about our new login-key using our old login-key
+		// TODO: We should re-sync after this
+	}
+
+	pub fn get_username(&self) -> &str {
+		self.sync_parameters.get_username()
 	}
 
 	pub fn get_root(&self) -> &Directory {
@@ -144,14 +164,16 @@ impl Database {
 		fortresscrypto::encrypt_to_file(&mut writer, &payload, &self.encryption_parameters, &self.file_key_suite)
 	}
 
-	pub fn load_from_path<P: AsRef<Path>>(path: P, password: &[u8]) -> io::Result<Database> {
+	pub fn load_from_path<P: AsRef<Path>, A: AsRef<str>>(path: P, password: A) -> io::Result<Database> {
+		let password = password.as_ref();
+
 		// This struct is needed because Database has fields that aren't part of
 		// serialization, but can't implement Default.
 		#[derive(Deserialize)]
 		struct SerializableDatabase {
 			objects: DatabaseObjectMap,
 			root_directory: ID,
-			master_key: Option<MasterKey>,
+			sync_parameters: SyncParameters,
 		}
 
 		// Read file and decrypt
@@ -159,7 +181,7 @@ impl Database {
 			let file = File::open(path)?;
 			let mut reader = BufReader::new(file);
 
-			fortresscrypto::decrypt_from_file(&mut reader, password)?
+			fortresscrypto::decrypt_from_file(&mut reader, password.as_bytes())?
 		};
 		
 		// Deserialize
@@ -169,7 +191,7 @@ impl Database {
 		Ok(Database {
 			objects: db.objects,
 			root_directory: db.root_directory,
-			master_key: db.master_key,
+			sync_parameters: db.sync_parameters,
 
 			encryption_parameters: encryption_parameters,
 			file_key_suite: file_key_suite,
@@ -227,10 +249,10 @@ mod tests {
 	fn encrypt_then_decrypt() {
 		let mut rng = OsRng::new().expect("OsRng failed to initialize");
 		let password_len = rng.gen_range(0, 64);
-		let password = rng.gen_iter::<u8>().take(password_len).collect::<Vec<u8>>();
+		let password: String = rng.gen_iter::<char>().take(password_len).collect();
 		let tmp_dir = TempDir::new("test").unwrap();
 
-		let mut db = Database::new_with_password(&password);
+		let mut db = Database::new_with_password("username", &password);
 		db.new_entry();
 		db.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
 
@@ -246,9 +268,10 @@ mod tests {
 		let tmp_dir = TempDir::new("test").unwrap();
 
 		// Create DB
-		let mut db = Database::new_with_password("password".as_bytes());
+		let mut db = Database::new_with_password("username", "password");
 		let old_salt = db.encryption_parameters.salt.clone();
 		let old_file_key_suite = db.file_key_suite.clone();
+		let old_sync_parameters = db.sync_parameters.clone();
 
 		let mut entry = Entry::new();
 		entry.edit(EntryHistory::new(HashMap::new()));
@@ -261,21 +284,33 @@ mod tests {
 		db.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
 
 		// Password change should change file encryption keys, even if using the same password
-		db.change_password("password".as_bytes());
+		db.change_password("username", "password");
 		assert_ne!(db.encryption_parameters.salt, old_salt);
 		assert_ne!(db.file_key_suite, old_file_key_suite);
 
-		db.change_password("password2".as_bytes());
+		// Password change should not change network keys if using the same password
+		assert_eq!(db.sync_parameters, old_sync_parameters);
+
+		// Changing username should change network keys even if using the same password
+		db.change_password("username2", "password");
+		assert_ne!(db.sync_parameters.get_master_key(), old_sync_parameters.get_master_key());
+		assert_ne!(db.sync_parameters.get_login_key(), old_sync_parameters.get_login_key());
+		assert_ne!(db.sync_parameters.get_login_username(), old_sync_parameters.get_login_username());
+		assert_ne!(db.sync_parameters.get_network_key_suite(), old_sync_parameters.get_network_key_suite());
+
+		// Password change should change all keys if username and/or password are different
+		db.change_password("username", "password2");
 		assert_ne!(db.encryption_parameters.salt, old_salt);
 		assert_ne!(db.file_key_suite, old_file_key_suite);
+		assert_ne!(db.sync_parameters, old_sync_parameters);
 
 		// Save
 		db.save_to_path(tmp_dir.path().join("test2.fortressdb")).unwrap();
 
 		// Load
-		let db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), "password".as_bytes()).unwrap();
-		let db3 = Database::load_from_path(tmp_dir.path().join("test2.fortressdb"), "password2".as_bytes()).unwrap();
-		Database::load_from_path(tmp_dir.path().join("test2.fortressdb"), "password".as_bytes()).expect_err("Shouldn't be able to load database with old password");
+		let db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), "password").unwrap();
+		let db3 = Database::load_from_path(tmp_dir.path().join("test2.fortressdb"), "password2").unwrap();
+		Database::load_from_path(tmp_dir.path().join("test2.fortressdb"), "password").expect_err("Shouldn't be able to load database with old password");
 
 		assert_eq!(db.objects, db2.objects);
 		assert_eq!(db.root_directory, db2.root_directory);
@@ -286,14 +321,13 @@ mod tests {
 	// Just some sanity checks on our keys
 	#[test]
 	fn key_sanity_checks() {
-		let db = Database::new_with_password("password".as_bytes());
-		let db2 = Database::new_with_password("password".as_bytes());
+		let db = Database::new_with_password("username", "password");
+		let db2 = Database::new_with_password("username", "password");
 
 		assert!(db != db2);
 		assert_ne!(db.encryption_parameters, db2.encryption_parameters);
 		assert_ne!(db.file_key_suite, db2.file_key_suite);
-		assert_eq!(db.master_key, db2.master_key);
-		// TODO: assert_eq!(db.network_key_suite, db2.network_key_suite);
+		assert_eq!(db.sync_parameters, db2.sync_parameters);
 	}
 
 	#[test]
@@ -346,9 +380,10 @@ mod tests {
 		let tmp_dir = TempDir::new("test").unwrap();
 		let mut rng = OsRng::new().expect("OsRng failed to initialize");
 
-		// Unicode in password
-		let password = rng.gen_iter::<char>().take(256).collect::<String>();
-		let mut db = Database::new_with_password(password.as_bytes());
+		// Unicode in username and password
+		let username: String = rng.gen_iter::<char>().take(256).collect();
+		let password: String = rng.gen_iter::<char>().take(256).collect();
+		let mut db = Database::new_with_password(&username, &password);
 
 		// Unicode in entries
 		let a = rng.gen_iter::<char>().take(256).collect::<String>();
@@ -374,8 +409,9 @@ mod tests {
 		db.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
 
 		// Load
-		let db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), password.as_bytes()).unwrap();
+		let db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), &password).unwrap();
 		assert_eq!(db, db2);
+		assert_eq!(db2.sync_parameters.get_username(), username);
 
 		let entry_id = db2.get_root().list_entries(&db2)[0];
 		let entry = db2.get_entry_by_id(entry_id).unwrap();
@@ -388,7 +424,7 @@ mod tests {
 		let tmp_dir = TempDir::new("test").unwrap();
 
 		// Test empty password
-		let mut db = Database::new_with_password(&[]);
+		let mut db = Database::new_with_password("", "");
 
 		// Test empty entry
 		db.add_entry(Entry::new());
@@ -397,7 +433,7 @@ mod tests {
 		db.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
 
 		// Load
-		let db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), &[]).unwrap();
+		let db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), "").unwrap();
 		assert_eq!(db, db2);
 
 		let entry_id = db2.get_root().list_entries(&db2)[0];
@@ -406,13 +442,13 @@ mod tests {
 		assert_eq!(entry.get_state().len(), 0);
 
 		// Test empty database
-		let db = Database::new_with_password("foobar".as_bytes());
+		let db = Database::new_with_password("username", "foobar");
 
 		// Save
 		db.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
 
 		// Load
-		let db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), "foobar".as_bytes()).unwrap();
+		let db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), "foobar").unwrap();
 		assert_eq!(db, db2);
 
 		assert_eq!(db2.objects.len(), 1);
@@ -425,7 +461,7 @@ mod tests {
 		let tmp_dir = TempDir::new("test").unwrap();
 
 		// Build database
-		let mut db = Database::new_with_password("foobar".as_bytes());
+		let mut db = Database::new_with_password("username", "foobar");
 
 		let mut entry = Entry::new();
 		entry.edit(EntryHistory::new(HashMap::new()));
@@ -460,7 +496,7 @@ mod tests {
 		db.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
 
 		// Load
-		let mut db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), "foobar".as_bytes()).unwrap();
+		let mut db2 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), "foobar").unwrap();
 		assert_eq!(db, db2);
 
 		// Edit
@@ -481,7 +517,7 @@ mod tests {
 		db2.save_to_path(tmp_dir.path().join("test.fortressdb")).unwrap();
 
 		// Load
-		let db3 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), "foobar".as_bytes()).unwrap();
+		let db3 = Database::load_from_path(tmp_dir.path().join("test.fortressdb"), "foobar").unwrap();
 		assert_eq!(db2, db3);
 
 		for id in db3.get_root().list_entries(&db3) {
