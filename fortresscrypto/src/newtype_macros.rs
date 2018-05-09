@@ -173,7 +173,7 @@ macro_rules! newtype_traits (($newtype:ident, $len:expr) => (
     }
     ));
 
-/*macro_rules! public_newtype_traits (($newtype:ident) => (
+macro_rules! public_newtype_traits (($newtype:ident) => (
     impl AsRef<[u8]> for $newtype {
         #[inline]
         fn as_ref(&self) -> &[u8] {
@@ -214,7 +214,7 @@ macro_rules! newtype_traits (($newtype:ident, $len:expr) => (
             ::std::hash::Hash::hash(self.as_ref(), state)
         }
     }
-    ));*/
+    ));
 
 /// Macro used for generating newtypes of byte-arrays
 ///

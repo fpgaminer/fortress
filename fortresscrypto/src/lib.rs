@@ -22,6 +22,10 @@ new_type!{
 	secret Key(32);
 }
 
+new_type!{
+	public MacTag(32);
+}
+
 
 // The MasterKey is used to derive the keys used for cloud storage.  Because of this, we want it to be _extremely_ hard to crack.
 // Since we don't care how long it initially takes to generate (e.g. the user won't notice it taking 5 minutes to initially sync to the cloud), we can use
@@ -104,7 +108,7 @@ impl NetworkKeySuite {
 
 	// Deterministically encrypt data, returning (ciphertext, mac)
 	// ID is included in the MAC calculation, but not in the ciphertext; useful for ensuring the server can't swap object data around.
-	pub fn encrypt_object(&self, id: &[u8], data: &[u8]) -> (Vec<u8>, Vec<u8>) {
+	pub fn encrypt_object(&self, id: &[u8], data: &[u8]) -> (Vec<u8>, MacTag) {
 		deterministic_encryption(id, data, &self.salt_key, &self.mac_key, &self.encryption_key)
 	}
 
@@ -138,8 +142,8 @@ impl FileKeySuite {
 
 	// Deterministically encrypt data, returning ciphertext+mac
 	fn encrypt_object(&self, data: &[u8]) -> Vec<u8> {
-		let (mut ciphertext, mut mac) = deterministic_encryption(&[], data, &self.salt_key, &self.mac_key, &self.encryption_key);
-		ciphertext.append(&mut mac);
+		let (mut ciphertext, mac) = deterministic_encryption(&[], data, &self.salt_key, &self.mac_key, &self.encryption_key);
+		ciphertext.extend_from_slice(&mac[..]);
 		ciphertext
 	}
 
@@ -291,7 +295,7 @@ fn derive_deterministic_encryption_key(encryption_key: &Key, salt: &[u8]) -> Key
 // The result is salt+ciphertext+mac.
 // During decryption we validate the MAC first, which prevents attackers from manipulating our algorithm.
 // id is included in the MAC calculation, but it is not included as part of ciphertext.
-fn deterministic_encryption(id: &[u8], plaintext: &[u8], salt_key: &Key, mac_key: &Key, encryption_key: &Key) -> (Vec<u8>, Vec<u8>) {
+fn deterministic_encryption(id: &[u8], plaintext: &[u8], salt_key: &Key, mac_key: &Key, encryption_key: &Key) -> (Vec<u8>, MacTag) {
 	let salt = hmac(salt_key, plaintext).code().to_vec();
 	let salted_encryption_key = derive_deterministic_encryption_key(encryption_key, &salt);
 	let mut ciphertext = chacha20_process(&salted_encryption_key, plaintext);
@@ -304,7 +308,7 @@ fn deterministic_encryption(id: &[u8], plaintext: &[u8], salt_key: &Key, mac_key
 		let mut hmac = Hmac::new(Sha256::new(), &mac_key[..]);
 		hmac.input(id);
 		hmac.input(&result);
-		hmac.result().code().to_vec()
+		MacTag::from_slice(hmac.result().code()).unwrap()
 	};
 
 	(result, mac)
@@ -491,7 +495,7 @@ mod tests {
 
 		let (ciphertext, mac) = deterministic_encryption(&id, &data, &salt_key, &mac_key, &encryption_key);
 		let mut ciphertext_and_mac = ciphertext.clone();
-		ciphertext_and_mac.extend_from_slice(&mac);
+		ciphertext_and_mac.extend_from_slice(&mac[..]);
 
 		let plaintext = deterministic_decryption(&id, &ciphertext_and_mac, &mac_key, &encryption_key).unwrap();
 
