@@ -53,7 +53,22 @@ impl DatabaseObjectMap {
 	}
 
 	// Update an object in the map (or insert if it didn't already exist)
+	// NOTE: Does not allow you to overwrite an existing object if the new object's history is less than the existing object.
+	// This is to prevent accidentally calling update with an older version of an object.
 	pub fn update(&mut self, object: DatabaseObject) {
+		match (self.inner.get(object.get_id()), &object) {
+			(Some(&DatabaseObject::Entry(ref existing)), &DatabaseObject::Entry(ref new_object)) => if existing.get_history().len() > new_object.get_history().len() {
+				panic!("Attempted to overwrite an existing DatabaseObject with an older version.");
+			},
+			(Some(&DatabaseObject::Directory(ref existing)), &DatabaseObject::Directory(ref new_object)) => if existing.get_history().len() > new_object.get_history().len() {
+				panic!("Attempted to overwrite an existing DatabaseObject with an older version.");
+			},
+			(None, _) => {},
+			_ => {
+				panic!("Attempted to overwrite an existing DatabaseObject with a different type object.");
+			},
+		}
+
 		self.inner.insert(object.get_id().clone(), object);
 	}
 }
@@ -84,5 +99,31 @@ impl<'a> IntoIterator for &'a DatabaseObjectMap {
 
 	fn into_iter(self) -> std::collections::hash_map::Iter<'a, ID, DatabaseObject> {
 		self.inner.iter()
+	}
+}
+
+
+#[cfg(test)]
+mod tests {
+	use super::DatabaseObjectMap;
+	use super::super::{DatabaseObject, Entry, EntryHistory};
+
+	#[test]
+	#[should_panic]
+	fn cannot_overwrite_with_older_object() {
+		let mut object_map = DatabaseObjectMap::new();
+
+		let mut entry = Entry::new();
+		let old_entry = entry.clone();
+		entry.edit(EntryHistory::new([
+			("title".to_string(), "Panic at the HashMap".to_string()),
+			].iter().cloned().collect()));
+		
+		object_map.update(DatabaseObject::Entry(entry.clone()));
+
+		// TODO: It would be nice to not use [should_panic] on this whole test function
+		// and rather just indicate that this particular statement should panic.
+		// I was not able to find a nice way to do that yet.
+		object_map.update(DatabaseObject::Entry(old_entry.clone()));
 	}
 }
