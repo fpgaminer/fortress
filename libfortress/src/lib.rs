@@ -38,7 +38,7 @@ extern crate reqwest;
 #[macro_use] mod newtype_macros;
 mod database_object;
 mod database_object_map;
-mod sync_parameters;
+pub mod sync_parameters;
 
 pub use database_object::{Directory, Entry, EntryHistory};
 
@@ -205,6 +205,8 @@ impl Database {
 	// TODO: Instead of having library users call sync themselves, we should just an init method which sets up a continuous automatic
 	// background sync.
 	// TODO: Cleanup unwraps and add proper error handling
+	// TODO: Need to sync a "Restore" object that other clients can use to bootstrap from
+	// nothing.  This will tell them the root object id.
 	// Returns true if the database has changed as a result of the sync.
 	pub fn sync<U: IntoUrl>(&mut self, url: U) -> bool {
 		let mut url = url.into_url().unwrap();
