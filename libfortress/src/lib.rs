@@ -33,6 +33,7 @@ extern crate crypto;
 extern crate byteorder;
 extern crate tempdir;
 pub extern crate fortresscrypto;
+extern crate reqwest;
 
 #[macro_use] mod newtype_macros;
 mod database_object;
@@ -47,10 +48,12 @@ use std::fs::File;
 use std::io::{self, BufReader, BufWriter};
 use std::path::Path;
 use std::str;
-use fortresscrypto::{EncryptionParameters, FileKeySuite};
-use database_object::DatabaseObject;
+use fortresscrypto::{EncryptionParameters, FileKeySuite, LoginKey, MacTag};
+use database_object::{DatabaseObject, DirectoryHistoryAction};
 use database_object_map::DatabaseObjectMap;
-use sync_parameters::SyncParameters;
+use sync_parameters::{SyncParameters, LoginId};
+use std::cmp;
+use reqwest::{Url, IntoUrl};
 
 
 new_type!{
@@ -197,6 +200,446 @@ impl Database {
 			file_key_suite: file_key_suite,
 		})
 	}
+
+	// TODO: Sync should be performed in a separate background thread
+	// TODO: Instead of having library users call sync themselves, we should just an init method which sets up a continuous automatic
+	// background sync.
+	// TODO: Cleanup unwraps and add proper error handling
+	// Returns true if the database has changed as a result of the sync.
+	pub fn sync<U: IntoUrl>(&mut self, url: U) -> bool {
+		let mut url = url.into_url().unwrap();
+		url.set_scheme("https").unwrap();	// Force SSL
+		let client = reqwest::Client::new();
+
+		// Diff existing objects
+		let (updates, unknown_ids) = self.sync_api_diff_objects(&client, &url).unwrap();
+
+		// Upload objects the server didn't know about
+		for unknown_id in &unknown_ids {
+			if let Some(object) = self.objects.get(unknown_id) {
+				self.sync_api_update_object(&client, &url, object).unwrap();
+			}
+			else {
+				println!("WARNING: Server named an unknown_id that we don't have in our database: {:?}", unknown_id);
+			}
+		}
+
+		// Block needed to control lifetime
+		let queued_updates = {
+			// Decrypt and sort diffs into Entries and Directories
+			let (entry_updates, directory_updates, reuploads) = self.sync_decrypt_and_sort_diffs(&updates);
+
+			// Re-upload broken objects
+			for object in reuploads {
+				match self.sync_api_update_object(&client, &url, object) {
+					Ok(_) => (),
+					Err(err) => println!("WARNING: Error updating object on server: {:?}", err),
+				}
+			}
+
+			// Merges
+			let mut queued_updates = Vec::new();
+
+			queued_updates.append(&mut self.sync_merge_entries(&entry_updates));
+			queued_updates.append(&mut self.sync_merge_directories(&client, &url, &directory_updates));
+
+			queued_updates
+		};
+
+		// TODO: This is just a proxy for whether changes occured and may tend to indicate true even
+		// in cases where no changes happened.
+		let database_changed = queued_updates.len() > 0;
+
+		// Finally, merge queued updates into our local database
+		for (new_object, should_upload) in queued_updates {
+			// Update local DB
+			self.objects.update(new_object.clone());
+
+			if should_upload {
+				match self.sync_api_update_object(&client, &url, &new_object) {
+					Ok(_) => (),
+					Err(err) => {
+						println!("WARNING: Error uploading object to server: {:?}", err);
+					}
+				}
+			}
+		}
+
+		database_changed
+	}
+
+	// Upload object to fortress server
+	fn sync_api_update_object(&self, client: &reqwest::Client, url: &Url, object: &DatabaseObject) -> Result<(), ApiError> {
+		#[derive(Serialize, Debug)]
+		struct UpdateObjectRequest<'a,'b,'c,'d,'e> {
+			user_id: &'a LoginId,
+			user_key: &'b LoginKey,
+			object_id: &'c ID,
+			#[serde(with = "hex_format")] data: &'d [u8],
+			data_mac: &'e MacTag,
+		}
+
+		// Encrypt
+		let (ciphertext, mac) = {
+			let payload = serde_json::to_vec(&object).unwrap();
+			self.sync_parameters.get_network_key_suite().encrypt_object(&object.get_id()[..], &payload)
+		};
+
+		let request = UpdateObjectRequest {
+			user_id: self.sync_parameters.get_login_id(),
+			user_key: self.sync_parameters.get_login_key(),
+			object_id: object.get_id(),
+			data: &ciphertext,
+			data_mac: &mac,
+		};
+
+		let _: ApiEmptyResponse = api_request(&client, url.join("/update_object").unwrap(), &request)?;
+		Ok(())
+	}
+
+	// Diffs all existing objects in the database against the fortress server
+	// Returns updates and IDs unknown to the server.
+	fn sync_api_diff_objects(&self, client: &reqwest::Client, url: &Url) -> Result<(Vec<DiffObjectResponseUpdate>, Vec<ID>), ApiError> {
+		#[derive(Serialize)]
+		struct DiffObjectRequest<'a,'b,'c> {
+			user_id: &'a LoginId,
+			user_key: &'b LoginKey,
+			objects: Vec<DiffObjectRequestObject<'c>>,
+		}
+
+		#[derive(Serialize)]
+		struct DiffObjectRequestObject<'a> {
+			id: &'a ID,
+			mac: MacTag,
+		}
+
+		#[derive(Deserialize)]
+		struct DiffObjectResponse {
+			updates: Vec<DiffObjectResponseUpdate>,
+			unknown_ids: Vec<ID>,
+		}
+
+		let mut diff_object_request = DiffObjectRequest {
+			user_id: self.sync_parameters.get_login_id(),
+			user_key: self.sync_parameters.get_login_key(),
+			objects: Vec::new(),
+		};
+
+		for (id, object) in &self.objects {
+			// Calculate MAC
+			// TODO: This should be cached (and possibly saved out to file)
+			let payload = serde_json::to_vec(object).unwrap();
+			let (_, mac) = self.sync_parameters.get_network_key_suite().encrypt_object(&id[..], &payload);
+
+			diff_object_request.objects.push(DiffObjectRequestObject {
+				id: id,
+				mac: mac,
+			});
+		}
+
+		let response: DiffObjectResponse = api_request(&client, url.join("/diff_objects").unwrap(), &diff_object_request)?;
+
+		Ok((response.updates, response.unknown_ids))
+	}
+
+	// Fetch an object from the server.
+	// If the object doesn't exist on the server or could not be decrypted then None is returned.
+	fn sync_api_get_object(&self, client: &reqwest::Client, url: &Url, id: &ID) -> Result<Option<DatabaseObject>, ApiError> {
+		#[derive(Serialize)]
+		struct GetObjectRequest<'a,'b,'c> {
+			user_id: &'a LoginId,
+			user_key: &'b LoginKey,
+			object_id: &'c ID,
+		}
+
+		#[derive(Deserialize)]
+		struct GetObjectResponse {
+			#[serde(with = "hex_format")]
+			data: Vec<u8>,
+			mac: MacTag,
+		}
+
+		let request = GetObjectRequest {
+			user_id: self.sync_parameters.get_login_id(),
+			user_key: self.sync_parameters.get_login_key(),
+			object_id: id,
+		};
+
+		let response: GetObjectResponse = api_request(&client, url.join("/get_object").unwrap(), &request)?;
+		let ciphertext = [&response.data[..], &response.mac[..]].concat();
+
+		match self.sync_parameters.get_network_key_suite().decrypt_object(&id[..], &ciphertext) {
+			Ok(plaintext) => {
+				Ok(Some(serde_json::from_slice(&plaintext).unwrap()))
+			},
+			Err(err) => {
+				println!("WARNING: Error while decrypting server object(ID: {:?}): {}", id, err);
+				Ok(None)
+			}
+		}
+	}
+
+	// Decrypt and sort diffs into Entries and Directories
+	// Returns a list of entry updates, directory updates, and objects that need to be reuploaded due to errors
+	fn sync_decrypt_and_sort_diffs(&self, updates: &[DiffObjectResponseUpdate]) -> (Vec<(&Entry, Entry)>, Vec<(&Directory, Directory)>, Vec<&DatabaseObject>) {
+		let mut entry_updates = Vec::new();
+		let mut directory_updates = Vec::new();
+		let mut reuploads = Vec::new();
+
+		for update in updates {
+			// Get local object
+			let local_object = match self.objects.get(&update.id) {
+				Some(object) => object,
+				None => continue,	// Ignore server's weirdness
+			};
+
+			// Decrypt
+			let plaintext = {
+				let ciphertext = [&update.data[..], &update.mac[..]].concat();
+
+				match self.sync_parameters.get_network_key_suite().decrypt_object(&update.id[..], &ciphertext) {
+					Ok(plaintext) => plaintext,
+					Err(err) => {
+						println!("WARNING: Error while decrypting server object: {}", err);
+
+						// Fix using our copy
+						reuploads.push(local_object);
+						continue;
+					}
+				}
+			};
+
+			// Parse
+			let server_object = serde_json::from_slice(&plaintext).unwrap();
+
+			// Sort
+			match local_object {
+				&DatabaseObject::Entry(ref local_entry) => match server_object {
+					DatabaseObject::Entry(server_entry) => entry_updates.push((local_entry, server_entry)),
+					_ => {
+						// This shouldn't happen, but we'll fix using our copy
+						reuploads.push(local_object);
+						continue;
+					},
+				},
+				&DatabaseObject::Directory(ref local_directory) => match server_object {
+					DatabaseObject::Directory(server_directory) => directory_updates.push((local_directory, server_directory)),
+					_ => {
+						// This shouldn't happen, but we'll fix using our copy
+						reuploads.push(local_object);
+						continue;
+					},
+				},
+			}
+		}
+
+		(entry_updates, directory_updates, reuploads)
+	}
+
+	fn sync_merge_entries(&self, updates: &[(&Entry, Entry)]) -> Vec<(DatabaseObject, bool)> {
+		let mut queued_updates = Vec::new();
+
+		for &(local_entry, ref server_entry) in updates {
+			// Merge
+			let (new_entry, should_upload) = sync_merge_entry(local_entry, &server_entry);
+
+			// Queue update
+			queued_updates.push((DatabaseObject::Entry(new_entry), should_upload));
+		}
+
+		queued_updates
+	}
+
+	fn sync_merge_directories(&self, client: &reqwest::Client, url: &Url, updates: &[(&Directory, Directory)]) -> Vec<(DatabaseObject, bool)> {
+		let mut queued_updates = Vec::new();
+
+		// TODO: Sync doesn't support nested directories yet, so we will only sync the root directory.
+		for &(local_directory, ref server_directory) in updates {
+			if server_directory.get_id() != self.root_directory {
+				panic!("ERROR: We do not currently support nested directories");
+			}
+
+			queued_updates.append(&mut self.sync_merge_directory_and_recurse(client, url, local_directory, &server_directory));
+		}
+
+		queued_updates
+	}
+
+	// Merge a directory update and also download new objects resulting from the merge
+	// If we fail to download any of the new objects this function will return an empty vector
+	fn sync_merge_directory_and_recurse(&self, client: &reqwest::Client, url: &Url, local_directory: &Directory, server_directory: &Directory) -> Vec<(DatabaseObject, bool)> {
+		let mut queued_updates = Vec::new();
+
+		let (new_directory, new_ids, should_upload) = sync_merge_directory(local_directory, server_directory, &self.objects);
+		queued_updates.push((DatabaseObject::Directory(new_directory), should_upload));
+
+		// Download new objects
+		for new_id in new_ids {
+			match self.sync_api_get_object(client, url, &new_id) {
+				Ok(Some(object)) => {
+					queued_updates.push((object, false));
+				},
+				Ok(None) => {
+					println!("WARNING: Missing object from server ({:?})", new_id);
+					return Vec::new();  // Back out of merging the directory, it would be incomplete otherwise
+				},
+				Err(err) => {
+					println!("WARNING: Error fetching object from server ({:?}): {:?}", new_id, err);
+					return Vec::new();  // Back out of merging the directory, it would be incomplete otherwise
+				},
+			}
+		}
+
+		queued_updates
+	}
+}
+
+
+#[derive(Deserialize)]
+struct DiffObjectResponseUpdate {
+	id: ID,
+	#[serde(with = "hex_format")]
+	data: Vec<u8>,
+	mac: MacTag,
+}
+
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum ApiErrorResponse<T> {
+	Error { error: String },
+	Ok(T),
+}
+
+// Used when the api will either return an error or nothing.
+#[derive(Deserialize)]
+struct ApiEmptyResponse {}
+
+#[derive(Debug)]
+enum ApiError {
+	ReqwestError(reqwest::Error),
+	ApiError(String),
+}
+
+impl From<reqwest::Error> for ApiError {
+	fn from(err: reqwest::Error) -> ApiError {
+		ApiError::ReqwestError(err)
+	}
+}
+
+// TODO: The server either returns { error: String } or the intended response (R).
+// The way we handle that is with a generic, flattened enum ApiErrorResponse.
+// This is a bit awkward; is there a better solution?
+fn api_request<U, T, R>(client: &reqwest::Client, url: U, request: &T) -> Result<R, ApiError>
+	where U: IntoUrl,
+	      T: serde::ser::Serialize + ?Sized,
+	      R: serde::de::DeserializeOwned
+{
+	let response = client.post(url)
+		.json(request)
+		.send()?;
+	
+	let response: ApiErrorResponse<R> = response.error_for_status()?.json()?;
+
+	match response {
+		ApiErrorResponse::Error { error: err } => Err(ApiError::ApiError(err)),
+		ApiErrorResponse::Ok(v) => Ok(v),
+	}
+}
+
+
+// Returns the merged entry and a bool indicating if the new entry should be uploaded to the server.
+// TODO: Currently this panics in the case of a conflict.  We'll want to do conflict resolution instead.
+fn sync_merge_entry(local_entry: &Entry, server_entry: &Entry) -> (Entry, bool) {
+	// Make sure there are no conflicts
+	let shared_history_len = cmp::min(local_entry.get_history().len(), server_entry.get_history().len());
+
+	if local_entry.get_history()[..shared_history_len] != server_entry.get_history()[..shared_history_len] {
+		panic!("Unable to merge entries; conflict");
+	}
+
+	let mut new_entry = local_entry.clone();
+
+	// We use >= so that, in the case where the entries are the same, we force a re-upload.
+	if local_entry.get_history().len() >= server_entry.get_history().len() {
+		// Server entry is old
+		return (new_entry, true);
+	}
+	else {
+		// Server entry is ahead of us
+		for history in &server_entry.get_history()[shared_history_len..] {
+			new_entry.edit(history.clone());
+		}
+
+		return (new_entry, false);
+	}
+}
+
+
+// Returns the merged directory, a list of new IDs to download, and a bool indicating if the merged directory should be uploaded to the server.
+// TODO: Does not currently support nested directories.
+// TODO: Currently panics in the case of a conflict.
+fn sync_merge_directory(local_directory: &Directory, server_directory: &Directory, known_objects: &DatabaseObjectMap) -> (Directory, Vec<ID>, bool) {
+	let local_directory_history = local_directory.get_history();
+	let server_directory_history = server_directory.get_history();
+
+	let shared_history_len = cmp::min(local_directory_history.len(), server_directory_history.len());
+
+	if local_directory_history[..shared_history_len] != server_directory_history[..shared_history_len] {
+		panic!("Unable to merge directories; conflict");
+	}
+
+	let mut new_directory = local_directory.clone();
+	let mut new_ids = Vec::new();
+
+	if local_directory_history.len() > server_directory_history.len() {
+		// Server directory is old
+		return (new_directory, new_ids, true);
+	}
+	else {
+		// Server directory is ahead of us
+		for history in &server_directory_history[shared_history_len..] {
+			match history.action {
+				DirectoryHistoryAction::Add => {
+					new_directory.add(history.id);
+
+					match known_objects.get(&history.id) {
+						Some(&DatabaseObject::Directory(_)) => {
+							panic!("Nested directories are not currently supported.");
+						},
+						Some(&DatabaseObject::Entry(_)) => {},
+						None => {
+							new_ids.push(history.id);
+						},
+					}
+				},
+				DirectoryHistoryAction::Remove => {
+					new_directory.remove(history.id);
+				},
+			}
+		}
+
+		return (new_directory, new_ids, false);
+	}
+}
+
+
+mod hex_format {
+	use data_encoding::HEXLOWER_PERMISSIVE;
+	use serde::{self, Deserialize, Serializer, Deserializer};
+
+	pub fn serialize<S>(data: &[u8], serializer: S) -> Result<S::Ok, S::Error>
+		where S: Serializer
+	{
+		serializer.serialize_str(&HEXLOWER_PERMISSIVE.encode(data))
+	}
+
+	pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
+		where D: Deserializer<'de>
+	{
+		let s = String::deserialize(deserializer)?;
+		HEXLOWER_PERMISSIVE.decode(s.as_bytes()).map_err(serde::de::Error::custom)
+	}
 }
 
 
@@ -295,7 +738,7 @@ mod tests {
 		db.change_password("username2", "password");
 		assert_ne!(db.sync_parameters.get_master_key(), old_sync_parameters.get_master_key());
 		assert_ne!(db.sync_parameters.get_login_key(), old_sync_parameters.get_login_key());
-		assert_ne!(db.sync_parameters.get_login_username(), old_sync_parameters.get_login_username());
+		assert_ne!(db.sync_parameters.get_login_id(), old_sync_parameters.get_login_id());
 		assert_ne!(db.sync_parameters.get_network_key_suite(), old_sync_parameters.get_network_key_suite());
 
 		// Password change should change all keys if username and/or password are different
@@ -644,4 +1087,6 @@ mod tests {
 
 	// TODO: Test all the failure modes of opening a database
 	// TODO: e.g. make sure corrupting the database file results in a checksum failure, make sure a bad mac results in a MAC failure, etc.
+	// TODO: Add a test that contains a pre-serialized database and which deserializes it to ensure that we don't accidentally change the serialization formats.
+	// TODO: Test sync
 }

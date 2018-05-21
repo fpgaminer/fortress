@@ -210,6 +210,7 @@ builder_ui!(UiReferences;
 	stack_menu: gtk::Widget,
 	menu_btn_close: gtk::Button,
 	menu_btn_change_password: gtk::Button,
+	menu_btn_sync: gtk::Button,
 
 	stack_generate: gtk::Widget,
 	generate_spin_count: gtk::SpinButton,
@@ -372,6 +373,7 @@ impl App {
 		// Menu
 		connect!(master, self.ui.menu_btn_close, connect_clicked, menu_close_clicked);
 		connect!(master, self.ui.menu_btn_change_password, connect_clicked, menu_change_password_clicked);
+		connect!(master, self.ui.menu_btn_sync, connect_clicked, menu_sync_clicked);
 
 		// Generate View
 		connect!(master, self.ui.generate_btn_generate, connect_clicked, generate_btn_clicked);
@@ -547,6 +549,18 @@ impl App {
 
 	fn menu_change_password_clicked(&mut self) {
 		self.state = AppState::ChangePassword;
+		self.update();
+	}
+
+	fn menu_sync_clicked(&mut self) {
+		// TODO: Make URL configurable
+		// TODO: Provide visual feedback
+		if self.database.as_mut().unwrap().sync("https://127.0.0.1:9081") {
+			// Database changed; save to disk.
+			self.database.as_ref().unwrap().save_to_path(self.database_path.as_ref().unwrap()).unwrap();
+		}
+		
+		self.state = AppState::ViewDatabase;
 		self.update();
 	}
 
