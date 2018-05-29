@@ -22,7 +22,7 @@ use super::ID;
 // serializing a DatabaseObject, modifying the serialized representation, and then Deserializing,
 // but the point is to make it difficult and unnatural to bypass the invariants; it shouldn't
 // happen accidentally.
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub struct DatabaseObjectMap {
 	inner: HashMap<ID, DatabaseObject>,
 }

@@ -61,7 +61,8 @@ new_type!{
 }
 
 
-#[derive(Serialize, Eq, PartialEq, Debug)]
+// TODO: Not sure if we want this to be cloneable?
+#[derive(Serialize, Eq, PartialEq, Debug, Clone)]
 pub struct Database {
 	objects: DatabaseObjectMap,
 	root_directory: ID,
@@ -72,6 +73,8 @@ pub struct Database {
 	encryption_parameters: EncryptionParameters,
 	#[serde(skip_serializing, skip_deserializing)]
 	file_key_suite: FileKeySuite,
+	#[serde(skip_serializing, skip_deserializing)]
+	pub do_not_set_testing: bool,     // DO NOT SET TO true; used only during integration testing.
 }
 
 impl Database {
@@ -97,6 +100,7 @@ impl Database {
 
 			encryption_parameters: encryption_parameters,
 			file_key_suite: file_key_suite,
+			do_not_set_testing: false,
 		}
 	}
 
@@ -198,6 +202,7 @@ impl Database {
 
 			encryption_parameters: encryption_parameters,
 			file_key_suite: file_key_suite,
+			do_not_set_testing: false,
 		})
 	}
 
@@ -210,7 +215,9 @@ impl Database {
 	// Returns true if the database has changed as a result of the sync.
 	pub fn sync<U: IntoUrl>(&mut self, url: U) -> bool {
 		let mut url = url.into_url().unwrap();
-		url.set_scheme("https").unwrap();	// Force SSL
+		if self.do_not_set_testing == false {
+			url.set_scheme("https").unwrap();	// Force SSL
+		}
 		let client = reqwest::Client::new();
 
 		// Diff existing objects

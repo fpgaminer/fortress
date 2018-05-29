@@ -369,7 +369,7 @@ fn chacha20_process(key: &Key, data: &[u8]) -> Vec<u8> {
 }
 
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub struct EncryptionParameters {
 	// Parameters for deriving file_key using scrypt
 	pub log_n: u8,
