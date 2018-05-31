@@ -142,7 +142,7 @@ fn do_encrypt(path: &str, password: &str) {
 fn create_and_fill_model(database: &Database) -> gtk::TreeModelFilter {
 	let model = ListStore::new(&[String::static_type(), String::static_type()]);
 
-	let mut entries: Vec<(ID, String, i64)> = database.get_root().list_entries(&database).iter().map(|id| {
+	let mut entries: Vec<(ID, String, u64)> = database.get_root().list_entries(&database).iter().map(|id| {
 		let entry = database.get_entry_by_id(id).unwrap();
 		(**id, entry["title"].clone(), entry.get_time_created())
 	}).collect();

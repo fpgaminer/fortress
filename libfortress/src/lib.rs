@@ -23,7 +23,6 @@
 // network and login keys are calculated to prevent old versions from syncing.
 // We can then have a plan for more graceful versioning going forward.
 extern crate rand;
-extern crate time;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde;
@@ -621,7 +620,7 @@ fn sync_merge_directory(local_directory: &Directory, server_directory: &Director
 		for history in &server_directory_history[shared_history_len..] {
 			match history.action {
 				DirectoryHistoryAction::Add => {
-					new_directory.add(history.id);
+					new_directory.add_with_time(history.id, history.time);
 
 					match known_objects.get(&history.id) {
 						Some(&DatabaseObject::Directory(_)) => {
@@ -634,7 +633,7 @@ fn sync_merge_directory(local_directory: &Directory, server_directory: &Director
 					}
 				},
 				DirectoryHistoryAction::Remove => {
-					new_directory.remove(history.id);
+					new_directory.remove_with_time(history.id, history.time);
 				},
 			}
 		}
@@ -698,6 +697,15 @@ pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: b
 	}
 
 	result
+}
+
+
+// Returns the current unix timestamp in nanoseconds.
+// Our library won't handle time before the unix epoch, so we return u64.
+// NOTE: This will panic if used past ~2500 C.E. (Y2K taught me nothing).
+fn unix_timestamp() -> u64 {
+	let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
+	timestamp.as_secs().checked_mul(1000000000).unwrap().checked_add(timestamp.subsec_nanos() as u64).unwrap()
 }
 
 

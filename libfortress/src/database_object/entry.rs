@@ -1,5 +1,5 @@
 use rand::{OsRng, Rng};
-use super::super::{time, serde, ID};
+use super::super::{serde, ID, unix_timestamp};
 use std::collections::{HashMap, BTreeMap};
 use std::hash::Hash;
 use std::borrow::Borrow;
@@ -10,7 +10,7 @@ use std::ops::Index;
 pub struct Entry {
 	id: ID,
 	history: Vec<EntryHistory>,
-	time_created: i64,
+	time_created: u64,    // Unix timestamp for when this entry was created (nanoseconds)
 
 	// The current state of the entry
 	#[serde(skip_serializing, skip_deserializing)]
@@ -21,10 +21,10 @@ impl Entry {
 	pub fn new() -> Entry {
 		let mut rng = OsRng::new().expect("OsRng failed to initialize");
 
-		Entry::inner_new(rng.gen(), Vec::new(), time::now_utc().to_timespec().sec)
+		Entry::inner_new(rng.gen(), Vec::new(), unix_timestamp())
 	}
 
-	fn inner_new(id: ID, history: Vec<EntryHistory>, time_created: i64) -> Entry {
+	fn inner_new(id: ID, history: Vec<EntryHistory>, time_created: u64) -> Entry {
 		Entry {
 			id: id,
 			history: history,
@@ -39,7 +39,7 @@ impl Entry {
 		&self.id
 	}
 
-	pub fn get_time_created(&self) -> i64 {
+	pub fn get_time_created(&self) -> u64 {
 		self.time_created
 	}
 
@@ -58,6 +58,7 @@ impl Entry {
 		&self.history
 	}
 
+	// TODO: Panic if new_data's timestamp is not after the latest edit's timestamp
 	pub fn edit(&mut self, mut new_data: EntryHistory) {
 		// Remove any fields from the EntryHistory if they don't actually cause any changes to our state
 		new_data.data.retain(|k, v| self.state.get(k) != Some(v));
@@ -95,7 +96,7 @@ impl<'de> serde::Deserialize<'de> for Entry {
 		struct PartialDeserialized {
 			id: ID,
 			history: Vec<EntryHistory>,
-			time_created: i64,
+			time_created: u64,
 		}
 
 		let entry: PartialDeserialized = serde::Deserialize::deserialize(deserializer)?;
@@ -103,6 +104,7 @@ impl<'de> serde::Deserialize<'de> for Entry {
 		let mut entry = Entry::inner_new(entry.id, entry.history, entry.time_created);
 
 		// Re-construct current state from history
+		// TODO: Panic if history is not sorted (by timestamp)
 		for history in &history {
 			entry.apply_history(history);
 		}
@@ -114,7 +116,7 @@ impl<'de> serde::Deserialize<'de> for Entry {
 
 #[derive(Clone, Serialize, Deserialize, Eq, PartialEq, Debug)]
 pub struct EntryHistory {
-	pub time: i64,
+	pub time: u64,    // Unix timestamp for when this edit occured (nanoseconds)
 	#[serde(serialize_with = "ordered_map")]
 	pub data: HashMap<String, String>,
 }
@@ -122,7 +124,7 @@ pub struct EntryHistory {
 impl EntryHistory {
 	pub fn new(data: HashMap<String, String>) -> EntryHistory {
 		EntryHistory {
-			time: time::now_utc().to_timespec().sec,
+			time: unix_timestamp(),
 			data: data,
 		}
 	}
