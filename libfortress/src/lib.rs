@@ -31,7 +31,7 @@ extern crate serde_json;
 extern crate data_encoding;
 extern crate crypto;
 extern crate byteorder;
-extern crate tempdir;
+extern crate tempfile;
 pub extern crate fortresscrypto;
 extern crate reqwest;
 
@@ -54,6 +54,7 @@ use database_object_map::DatabaseObjectMap;
 use sync_parameters::{SyncParameters, LoginId};
 use std::cmp;
 use reqwest::{Url, IntoUrl};
+use tempfile::NamedTempFile;
 
 
 new_type!{
@@ -161,14 +162,24 @@ impl Database {
 	}
 
 	pub fn save_to_path<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
+		// Create a temporary file to write to
+		let mut temp_file = {
+			let parent_directory = path.as_ref().parent().ok_or(io::Error::new(io::ErrorKind::NotFound, "Bad path"))?;
+			NamedTempFile::new_in(parent_directory)?
+		};
+
 		// Serialized payload
 		let payload = serde_json::to_vec(&self)?;
 
-		// Encrypt and write to file
-		let file = File::create(path)?;
-		let mut writer = BufWriter::new(file);
-		
-		fortresscrypto::encrypt_to_file(&mut writer, &payload, &self.encryption_parameters, &self.file_key_suite)
+		// Encrypt and write to the temporary file
+		//let mut writer = BufWriter::new(&mut temp_file);
+		fortresscrypto::encrypt_to_file(&mut BufWriter::new(&mut temp_file), &payload, &self.encryption_parameters, &self.file_key_suite)?;
+
+		// Now close the temp file and move it to the destination.
+		// Moving a temporary file is atomic (at least on *nix), so doing it this way
+		// instead of writing directly to the destination file helps prevent data loss.
+		let temp_path = temp_file.into_temp_path();
+		temp_path.persist(path).map_err(|e| e.error)
 	}
 
 	pub fn load_from_path<P: AsRef<Path>, A: AsRef<str>>(path: P, password: A) -> io::Result<Database> {
@@ -695,14 +706,14 @@ mod tests {
 	use super::{Database, DatabaseObject, Directory, random_string, Entry, EntryHistory, ID, serde_json};
 	use rand::{OsRng, Rng};
 	use std::collections::HashMap;
-	use tempdir::TempDir;
+	use tempfile::tempdir;
 
 	#[test]
 	fn encrypt_then_decrypt() {
 		let mut rng = OsRng::new().expect("OsRng failed to initialize");
 		let password_len = rng.gen_range(0, 64);
 		let password: String = rng.gen_iter::<char>().take(password_len).collect();
-		let tmp_dir = TempDir::new("test").unwrap();
+		let tmp_dir = tempdir().unwrap();
 
 		let mut db = Database::new_with_password("username", &password);
 		db.new_entry();
@@ -717,7 +728,7 @@ mod tests {
 
 	#[test]
 	fn password_change() {
-		let tmp_dir = TempDir::new("test").unwrap();
+		let tmp_dir = tempdir().unwrap();
 
 		// Create DB
 		let mut db = Database::new_with_password("username", "password");
@@ -829,7 +840,7 @@ mod tests {
 	// Make sure database can handle Unicode characters everywhere
 	#[test]
 	fn test_unicode() {
-		let tmp_dir = TempDir::new("test").unwrap();
+		let tmp_dir = tempdir().unwrap();
 		let mut rng = OsRng::new().expect("OsRng failed to initialize");
 
 		// Unicode in username and password
@@ -873,7 +884,7 @@ mod tests {
 
 	#[test]
 	fn test_empty() {
-		let tmp_dir = TempDir::new("test").unwrap();
+		let tmp_dir = tempdir().unwrap();
 
 		// Test empty password
 		let mut db = Database::new_with_password("", "");
@@ -910,7 +921,7 @@ mod tests {
 	// Simulate typical usage of Database, exercising as many features as possible, and make sure Database operates correctly.
 	#[test]
 	fn test_database() {
-		let tmp_dir = TempDir::new("test").unwrap();
+		let tmp_dir = tempdir().unwrap();
 
 		// Build database
 		let mut db = Database::new_with_password("username", "foobar");
@@ -1097,5 +1108,4 @@ mod tests {
 	// TODO: Test all the failure modes of opening a database
 	// TODO: e.g. make sure corrupting the database file results in a checksum failure, make sure a bad mac results in a MAC failure, etc.
 	// TODO: Add a test that contains a pre-serialized database and which deserializes it to ensure that we don't accidentally change the serialization formats.
-	// TODO: Test sync
 }
