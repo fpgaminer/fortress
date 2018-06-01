@@ -4,6 +4,7 @@ use super::super::{serde, ID, Database, unix_timestamp};
 
 
 // A directory is a list of references to Entries and Directories, much like a filesystem directory.
+// History is always ordered (by timestamp) and consistent (no double adds or removes of non-existant IDs).
 #[derive(Serialize, Eq, PartialEq, Debug, Clone)]
 pub struct Directory {
 	id: ID,
@@ -37,7 +38,16 @@ impl Directory {
 	}
 
 	pub fn add_with_time(&mut self, id: ID, time: u64) {
-		self.entries.insert(id);
+		if !self.entries.insert(id) {
+			panic!("Attempt to add an ID to directory that already exists.");
+		}
+
+		if let Some(last) = self.history.last() {
+			if time <= last.time {
+				panic!("Directory history must be ordered");
+			}
+		}
+
 		self.history.push(DirectoryHistory {
 			id: id,
 			action: DirectoryHistoryAction::Add,
@@ -52,6 +62,12 @@ impl Directory {
 	pub fn remove_with_time(&mut self, id: ID, time: u64) {
 		if !self.entries.remove(&id) {
 			panic!("Attempt to remove an ID from directory that doesn't exist");
+		}
+
+		if let Some(last) = self.history.last() {
+			if time <= last.time {
+				panic!("Directory history must be ordered");
+			}
 		}
 
 		self.history.push(DirectoryHistory {
@@ -84,12 +100,22 @@ impl<'de> serde::Deserialize<'de> for Directory {
 		let mut entries = HashSet::new();
 
 		// Re-construct current state from history
-		// TODO: Panic if history is not sorted (by timestamp)
-		// TODO: Does this correctly panic if history is not valid (double-adds or removing entries that don't exist)
+		let mut min_next_timestamp = 0;
+
 		for history in &d.history {
+			// History must be ordered
+			if history.time < min_next_timestamp || history.time == <u64>::max_value() {
+				return Err(serde::de::Error::custom("Invalid history"));
+			}
+			min_next_timestamp = history.time + 1;
+
 			match history.action {
-				DirectoryHistoryAction::Add => entries.insert(history.id),
-				DirectoryHistoryAction::Remove => entries.remove(&history.id),
+				DirectoryHistoryAction::Add => if !entries.insert(history.id) {
+					return Err(serde::de::Error::custom("Invalid history"));
+				},
+				DirectoryHistoryAction::Remove => if !entries.remove(&history.id) {
+					return Err(serde::de::Error::custom("Invalid history"));
+				},
 			};
 		}
 
@@ -112,4 +138,102 @@ pub struct DirectoryHistory {
 pub enum DirectoryHistoryAction {
 	Add,
 	Remove,
+}
+
+
+#[cfg(test)]
+mod tests {
+	use rand::{OsRng, Rng};
+	use serde_json;
+	use super::{Directory, DirectoryHistory, DirectoryHistoryAction};
+
+	#[test]
+	fn history_must_be_ordered() {
+		let mut rng = OsRng::new().expect("OsRng failed to initialize");
+
+		let mut bad_directory1 = Directory::new();
+		bad_directory1.history = vec![
+			DirectoryHistory {
+				id: rng.gen(), action: DirectoryHistoryAction::Add, time: 50,
+			},
+			DirectoryHistory {
+				id: rng.gen(), action: DirectoryHistoryAction::Add, time: 0,
+			}
+		];
+
+		let serialized = serde_json::to_string(&bad_directory1).unwrap();
+		assert!(serde_json::from_str::<Directory>(&serialized).is_err());
+	}
+
+	// Cannot add IDs that already exist or delete IDs that don't exist
+	#[test]
+	fn history_must_be_consistent() {
+		let mut rng = OsRng::new().expect("OsRng failed to initialize");
+
+		{
+			let mut bad_directory = Directory::new();
+			let id1 = rng.gen();
+			bad_directory.history = vec![
+				DirectoryHistory {
+					id: id1, action: DirectoryHistoryAction::Add, time: 0,
+				},
+				DirectoryHistory {
+					id: id1, action: DirectoryHistoryAction::Add, time: 5,
+				}
+			];
+
+			let serialized = serde_json::to_string(&bad_directory).unwrap();
+			assert!(serde_json::from_str::<Directory>(&serialized).is_err());
+		}
+
+		{
+			let mut bad_directory = Directory::new();
+			bad_directory.history = vec![
+				DirectoryHistory {
+					id: rng.gen(), action: DirectoryHistoryAction::Remove, time: 0,
+				},
+			];
+
+			let serialized = serde_json::to_string(&bad_directory).unwrap();
+			assert!(serde_json::from_str::<Directory>(&serialized).is_err());
+		}
+	}
+
+	#[test]
+	#[should_panic]
+	fn bad_add_should_panic1() {
+		let mut rng = OsRng::new().expect("OsRng failed to initialize");
+		let mut directory = Directory::new();
+		let id = rng.gen();
+		directory.add(id);
+		directory.add(id);
+	}
+
+	#[test]
+	#[should_panic]
+	fn bad_add_should_panic2() {
+		let mut rng = OsRng::new().expect("OsRng failed to initialize");
+		let mut directory = Directory::new();
+		directory.add_with_time(rng.gen(), 42);
+		directory.add_with_time(rng.gen(), 0);
+	}
+
+	#[test]
+	#[should_panic]
+	fn bad_remove_should_panic1() {
+		let mut rng = OsRng::new().expect("OsRng failed to initialize");
+		let mut directory = Directory::new();
+		directory.remove(rng.gen());
+	}
+
+	#[test]
+	#[should_panic]
+	fn bad_remove_should_panic2() {
+		let mut rng = OsRng::new().expect("OsRng failed to initialize");
+		let mut directory = Directory::new();
+		let id = rng.gen();
+		directory.add_with_time(id, 1000);
+		directory.remove_with_time(id, 999);
+	}
+
 }
