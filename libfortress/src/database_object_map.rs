@@ -53,14 +53,13 @@ impl DatabaseObjectMap {
 	}
 
 	// Update an object in the map (or insert if it didn't already exist)
-	// NOTE: Does not allow you to overwrite an existing object if the new object's history is less than the existing object.
-	// This is to prevent accidentally calling update with an older version of an object.
+	// NOTE: Does not allow you to overwrite an existing object if that operation would be destructive (e.g. older version, conflicting history, etc).
 	pub fn update(&mut self, object: DatabaseObject) {
 		match (self.inner.get(object.get_id()), &object) {
-			(Some(&DatabaseObject::Entry(ref existing)), &DatabaseObject::Entry(ref new_object)) => if existing.get_history().len() > new_object.get_history().len() {
+			(Some(&DatabaseObject::Entry(ref existing)), &DatabaseObject::Entry(ref new_object)) => if !existing.safe_to_replace_with(new_object) {
 				panic!("Attempted to overwrite an existing DatabaseObject with an older version.");
 			},
-			(Some(&DatabaseObject::Directory(ref existing)), &DatabaseObject::Directory(ref new_object)) => if existing.get_history().len() > new_object.get_history().len() {
+			(Some(&DatabaseObject::Directory(ref existing)), &DatabaseObject::Directory(ref new_object)) => if !existing.safe_to_replace_with(new_object) {
 				panic!("Attempted to overwrite an existing DatabaseObject with an older version.");
 			},
 			(None, _) => {},

@@ -25,6 +25,36 @@ impl Directory {
 		}
 	}
 
+	// Returns None if history is invalid
+	fn from_history(id: ID, history: Vec<DirectoryHistory>) -> Option<Directory> {
+		// Re-construct state from history
+		let mut entries = HashSet::new();
+		let mut min_next_timestamp = 0;
+
+		for history_item in &history {
+			// History must be ordered
+			if history_item.time < min_next_timestamp || history_item.time == <u64>::max_value() {
+				return None;
+			}
+			min_next_timestamp = history_item.time + 1;
+
+			match history_item.action {
+				DirectoryHistoryAction::Add => if !entries.insert(history_item.id) {
+					return None;
+				},
+				DirectoryHistoryAction::Remove => if !entries.remove(&history_item.id) {
+					return None;
+				},
+			};
+		}
+
+		Some(Directory {
+			id: id,
+			entries: entries,
+			history: history,
+		})
+	}
+
 	pub fn get_id(&self) -> &ID {
 		&self.id
 	}
@@ -83,6 +113,47 @@ impl Directory {
 			database.get_entry_by_id(id).is_some()
 		}).collect()
 	}
+
+	// Merge self and other, returning a new Directory
+	// Returns None if there is a conflict.
+	pub fn merge(&self, other: &Directory) -> Option<Directory> {
+		if self.id != other.id {
+			return None;
+		}
+
+		// Concat histories
+		let mut merged_history = [&self.history[..], &other.history[..]].concat();
+
+		// Sort by timestamp
+		merged_history.sort_unstable_by(|a, b| a.time.cmp(&b.time));
+
+		// Remove duplicates (the same timestamp and operation)
+		merged_history.dedup();
+
+		// Re-build state and validate
+		// If we are unable to re-build state that means the merged history was
+		// invalid due to a conflict.
+		Directory::from_history(self.id, merged_history)
+	}
+
+	// Returns true only if it is safe to replace self with other in the Database.
+	// This is only true if doing so is a non-destructive operation (i.e. history is perserved).
+	pub fn safe_to_replace_with(&self, other: &Directory) -> bool {
+		if self.id != other.id {
+			return false;
+		}
+
+		let mut other_iter = other.history.iter();
+
+		// Sequentially search other's history for our history.
+		for item in &self.history {
+			if !other_iter.any(|other_item| other_item == item) {
+				return false;
+			}
+		}
+
+		return true;
+	}
 }
 
 impl<'de> serde::Deserialize<'de> for Directory {
@@ -97,33 +168,9 @@ impl<'de> serde::Deserialize<'de> for Directory {
 		}
 
 		let d: DirectoryDeserialized = serde::Deserialize::deserialize(deserializer)?;
-		let mut entries = HashSet::new();
-
-		// Re-construct current state from history
-		let mut min_next_timestamp = 0;
-
-		for history in &d.history {
-			// History must be ordered
-			if history.time < min_next_timestamp || history.time == <u64>::max_value() {
-				return Err(serde::de::Error::custom("Invalid history"));
-			}
-			min_next_timestamp = history.time + 1;
-
-			match history.action {
-				DirectoryHistoryAction::Add => if !entries.insert(history.id) {
-					return Err(serde::de::Error::custom("Invalid history"));
-				},
-				DirectoryHistoryAction::Remove => if !entries.remove(&history.id) {
-					return Err(serde::de::Error::custom("Invalid history"));
-				},
-			};
-		}
-
-		Ok(Directory {
-			id: d.id,
-			entries: entries,
-			history: d.history,
-		})
+		
+		// Re-builds state and validates
+		Directory::from_history(d.id, d.history).ok_or(serde::de::Error::custom("Invalid history"))
 	}
 }
 
@@ -236,4 +283,61 @@ mod tests {
 		directory.remove_with_time(id, 999);
 	}
 
+	// Tests merge and safe_to_replace_with
+	#[test]
+	fn merge_and_supersets() {
+		let mut rng = OsRng::new().expect("OsRng failed to initialize");
+
+		// Merge should fail if IDs don't match
+		{
+			let mut directory1 = Directory::new();
+			directory1.add(rng.gen());
+			let mut directory2 = directory1.clone();
+			directory2.id = rng.gen();
+			assert!(directory1.merge(&directory2).is_none());
+			assert!(!directory1.safe_to_replace_with(&directory2));
+		}
+
+		// Merge should fail on conflict
+		{
+			let mut directory1 = Directory::new();
+			directory1.add(rng.gen());
+			let mut directory2 = directory1.clone();
+			let id = rng.gen();
+			directory1.add(id);
+			directory2.add(id);
+			assert!(directory1.merge(&directory2).is_none());
+			assert!(!directory1.safe_to_replace_with(&directory2));
+		}
+
+		// Not safe to replace when history is different
+		{
+			let mut directory1 = Directory::new();
+			let mut directory2 = directory1.clone();
+			directory1.add(rng.gen());
+			directory2.add(rng.gen());
+			assert!(!directory1.safe_to_replace_with(&directory2));
+		}
+
+		// Always safe to replace after merging
+		{
+			let mut directory1 = Directory::new();
+			directory1.add(rng.gen());
+			let id = rng.gen();
+			directory1.add(id);
+			directory1.add(rng.gen());
+			let mut directory2 = directory1.clone();
+			directory2.add(rng.gen());
+			directory2.remove(id);
+			directory1.add(rng.gen());
+
+			assert_eq!(directory1.safe_to_replace_with(&directory2), false);
+			let merged1 = directory1.merge(&directory2).unwrap();
+			let merged2 = directory2.merge(&directory1).unwrap();
+			assert!(directory1.safe_to_replace_with(&merged1));
+			assert!(directory2.safe_to_replace_with(&merged1));
+			assert!(directory1.safe_to_replace_with(&merged2));
+			assert!(directory2.safe_to_replace_with(&merged2));
+		}
+	}
 }

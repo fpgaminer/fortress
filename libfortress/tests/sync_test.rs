@@ -75,14 +75,13 @@ fn sync_integration_test() {
 		("username".to_string(), "Editted in parallel".to_string())
 		].iter().cloned().collect()));
 	
-	// TODO: Merging conflicted directories isn't supported yet
-	/*let mut entry5 = Entry::new();
+	let mut entry5 = Entry::new();
 	entry5.edit(EntryHistory::new(HashMap::new()));
 	entry5.edit(EntryHistory::new([
 		("title".to_string(), "Parallel Add".to_string()),
 		("username".to_string(), "Entry from another mother".to_string())
 		].iter().cloned().collect()));
-	parallel_db.add_entry(entry5.clone());*/
+	parallel_db.add_entry(entry5.clone());
 
 	// Sync db
 	let db_before_sync = db.clone();

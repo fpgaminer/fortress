@@ -48,10 +48,9 @@ use std::io::{self, BufReader, BufWriter};
 use std::path::Path;
 use std::str;
 use fortresscrypto::{EncryptionParameters, FileKeySuite, LoginKey, MacTag};
-use database_object::{DatabaseObject, DirectoryHistoryAction};
+use database_object::DatabaseObject;
 use database_object_map::DatabaseObjectMap;
 use sync_parameters::{SyncParameters, LoginId};
-use std::cmp;
 use reqwest::{Url, IntoUrl};
 use tempfile::NamedTempFile;
 
@@ -570,28 +569,10 @@ fn api_request<U, T, R>(client: &reqwest::Client, url: U, request: &T) -> Result
 // Returns the merged entry and a bool indicating if the new entry should be uploaded to the server.
 // TODO: Currently this panics in the case of a conflict.  We'll want to do conflict resolution instead.
 fn sync_merge_entry(local_entry: &Entry, server_entry: &Entry) -> (Entry, bool) {
-	// Make sure there are no conflicts
-	let shared_history_len = cmp::min(local_entry.get_history().len(), server_entry.get_history().len());
+	let new_entry = local_entry.merge(server_entry).unwrap();
+	let should_upload = &new_entry != server_entry;
 
-	if local_entry.get_history()[..shared_history_len] != server_entry.get_history()[..shared_history_len] {
-		panic!("Unable to merge entries; conflict");
-	}
-
-	let mut new_entry = local_entry.clone();
-
-	// We use >= so that, in the case where the entries are the same, we force a re-upload.
-	if local_entry.get_history().len() >= server_entry.get_history().len() {
-		// Server entry is old
-		return (new_entry, true);
-	}
-	else {
-		// Server entry is ahead of us
-		for history in &server_entry.get_history()[shared_history_len..] {
-			new_entry.edit(history.clone());
-		}
-
-		return (new_entry, false);
-	}
+	(new_entry, should_upload)
 }
 
 
@@ -599,47 +580,20 @@ fn sync_merge_entry(local_entry: &Entry, server_entry: &Entry) -> (Entry, bool) 
 // TODO: Does not currently support nested directories.
 // TODO: Currently panics in the case of a conflict.
 fn sync_merge_directory(local_directory: &Directory, server_directory: &Directory, known_objects: &DatabaseObjectMap) -> (Directory, Vec<ID>, bool) {
-	let local_directory_history = local_directory.get_history();
-	let server_directory_history = server_directory.get_history();
-
-	let shared_history_len = cmp::min(local_directory_history.len(), server_directory_history.len());
-
-	if local_directory_history[..shared_history_len] != server_directory_history[..shared_history_len] {
-		panic!("Unable to merge directories; conflict");
-	}
-
-	let mut new_directory = local_directory.clone();
+	let new_directory = local_directory.merge(server_directory).unwrap();
+	let should_upload = &new_directory != server_directory;
 	let mut new_ids = Vec::new();
 
-	if local_directory_history.len() > server_directory_history.len() {
-		// Server directory is old
-		return (new_directory, new_ids, true);
-	}
-	else {
-		// Server directory is ahead of us
-		for history in &server_directory_history[shared_history_len..] {
-			match history.action {
-				DirectoryHistoryAction::Add => {
-					new_directory.add_with_time(history.id, history.time);
-
-					match known_objects.get(&history.id) {
-						Some(&DatabaseObject::Directory(_)) => {
-							panic!("Nested directories are not currently supported.");
-						},
-						Some(&DatabaseObject::Entry(_)) => {},
-						None => {
-							new_ids.push(history.id);
-						},
-					}
-				},
-				DirectoryHistoryAction::Remove => {
-					new_directory.remove_with_time(history.id, history.time);
-				},
-			}
+	// Scan history to find new IDs and prevent nested directories.
+	for history in new_directory.get_history() {
+		match known_objects.get(&history.id) {
+			Some(&DatabaseObject::Directory(_)) => panic!("Nested directories are not currently supported."),
+			Some(&DatabaseObject::Entry(_)) => (),
+			None => new_ids.push(history.id),
 		}
-
-		return (new_directory, new_ids, false);
 	}
+
+	(new_directory, new_ids, should_upload)
 }
 
 
