@@ -3,16 +3,20 @@ extern crate gtk;
 extern crate data_encoding;
 #[macro_use]
 extern crate clap;
+extern crate directories;
+extern crate serde;
+#[macro_use]
+extern crate serde_derive;
+extern crate serde_json;
 
 use data_encoding::HEXLOWER_PERMISSIVE;
 use gtk::{CellRendererText, ListStore, TreeView, TreeViewColumn};
 use gtk::prelude::*;
 use libfortress::{Database, ID};
 use std::cell::RefCell;
-use std::env;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{self, Write, Read, BufReader};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::mpsc::{channel, Sender, Receiver};
 
@@ -70,25 +74,53 @@ fn main() {
 		.args_from_usage(
 			"--encrypt               'Just encrypt the specified payload, writing to stdout'
 		     --decrypt               'Just decrypt the specified database, writing to stdout'
-		     --password=[PASSWORD]   'Password to use for --decrypt'
-		     [DATABASE]              'Fortress file to open'"
+		     --password=[PASSWORD]   'Password to use for --decrypt'"
 		)
-		.group(clap::ArgGroup::with_name("crypt").args(&["encrypt", "decrypt"]).requires_all(&["password", "DATABASE"]))
-		.get_matches();
+		.group(clap::ArgGroup::with_name("crypt").args(&["encrypt", "decrypt"]).requires_all(&["password", "DATABASE"]));
+	// In debug mode we won't auto-fill dir with the user's data dir.  Instead this argument is required.
+	// This is so devs don't accidentially mess up their personal Fortress data during development.
+	#[cfg(debug_assertions)]
+	let matches = matches.arg_from_usage("--dir=<DIR>             'Use DIR as data directory instead of the default'");
+	#[cfg(not(debug_assertions))]
+	let matches = matches.arg_from_usage("--dir=[DIR]             'Use DIR as data directory instead of the default'");
+	let matches = matches.get_matches();
+	
+	let data_dir = match matches.value_of("dir") {
+		Some(path) => PathBuf::from(path),
+		None => {
+			// Only use user directories if we are in a Release build; so devs don't accidentially
+			// mess up their personal Fortress data during development.
+			#[cfg(debug_assertions)]
+			{
+				eprintln!("ERROR: We are a debug build.  Must specify --dir.");
+				return;
+			}
+			#[cfg(not(debug_assertions))]
+			directories::ProjectDirs::from("", "", "Fortress").data_dir().to_owned()
+		},
+	};
+
+	fs::create_dir_all(&data_dir).unwrap();
+
+	if !data_dir.is_dir() {
+		eprintln!("'{:?}' is not a directory.", data_dir);
+		return;
+	}
+
+	let config_path = data_dir.join("config.json");
+	let database_path = data_dir.join("database.fortress");
 
 	if matches.is_present("decrypt") {
 		let password = matches.value_of("password").unwrap();
-		let path = matches.value_of("DATABASE").unwrap();
 
-		do_decrypt(path, password);
+		do_decrypt(database_path, password);
 		return;
 	}
 
 	if matches.is_present("encrypt") {
 		let password = matches.value_of("password").unwrap();
-		let path = matches.value_of("DATABASE").unwrap();
 
-		do_encrypt(path, password);
+		do_encrypt(database_path, password);
 		return;
 	}
 
@@ -98,7 +130,7 @@ fn main() {
 		return;
 	}
 
-	let app = App::new();
+	let app = App::new(&config_path, &database_path);
 	let (tx, rx) = channel::<fn(&mut App)>();
 	let event_master = EventMaster {
 		app: Rc::new(RefCell::new(app)),
@@ -112,7 +144,7 @@ fn main() {
 }
 
 
-fn do_decrypt(path: &str, password: &str) {
+fn do_decrypt<P: AsRef<Path>>(path: P, password: &str) {
 	// Read file and decrypt
 	let (payload, _, _) = {
 		let file = File::open(path).unwrap();
@@ -125,7 +157,7 @@ fn do_decrypt(path: &str, password: &str) {
 }
 
 
-fn do_encrypt(path: &str, password: &str) {
+fn do_encrypt<P: AsRef<Path>>(path: P, password: &str) {
 	let payload = {
 		let mut data = Vec::new();
 		File::open(path).unwrap().read_to_end(&mut data).unwrap();
@@ -183,10 +215,6 @@ builder_ui!(UiReferences;
 	window: gtk::Window,
 	stack: gtk::Stack,
 
-	stack_child_intro: gtk::Widget,
-	intro_btn_open: gtk::Button,
-	intro_btn_create: gtk::Button,
-
 	stack_child_password: gtk::Widget,
 	open_btn_open: gtk::Button,
 	open_entry_password: gtk::Entry,
@@ -211,6 +239,7 @@ builder_ui!(UiReferences;
 	menu_btn_close: gtk::Button,
 	menu_btn_change_password: gtk::Button,
 	menu_btn_sync: gtk::Button,
+	menu_entry_syncurl: gtk::Entry,
 
 	stack_generate: gtk::Widget,
 	generate_spin_count: gtk::SpinButton,
@@ -223,7 +252,6 @@ builder_ui!(UiReferences;
 
 
 enum AppState {
-	Intro,
 	OpenDatabasePassword,
 	CreateDatabasePassword,
 	ChangePassword,
@@ -234,10 +262,18 @@ enum AppState {
 }
 
 
+#[derive(Serialize, Deserialize)]
+struct Config {
+	sync_url: String,
+}
+
+
 struct App {
 	state: AppState,
 	database: Option<Database>,
-	database_path: Option<PathBuf>,
+	config: Config,
+	config_path: PathBuf,
+	database_path: PathBuf,
 	current_entry_id: Option<ID>,
 	ui: UiReferences,
 
@@ -252,10 +288,19 @@ struct App {
 }
 
 impl App {
-	fn new() -> App {
+	fn new(config_path: &Path, database_path: &Path) -> App {
+		// Load config if it exists; else default
+		let (config, save_config) = if config_path.exists() {
+			let reader = File::open(config_path).unwrap();
+			(serde_json::from_reader(reader).unwrap(), false)
+		} else {
+			(Config {
+				sync_url: "".to_owned(),
+			}, true)
+		};
+
 		let builder = gtk::Builder::new_from_string(include_str!("window.glade"));
 		let ui = UiReferences::from_builder(&builder);
-		let database_path = env::args().nth(1).map(|path| PathBuf::from(path));
 
 		append_column(&ui.tree, 1);
 
@@ -270,19 +315,15 @@ impl App {
 		provider.load_from_data(include_str!("style.css")).unwrap();
 		gtk::StyleContext::add_provider_for_screen(&screen, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 
-		if database_path.is_some() {
-			ui.stack.set_visible_child(&ui.stack_child_password);
-			ui.window.set_focus(Some(&ui.open_entry_password));
-		} else {
-			ui.stack.set_visible_child(&ui.stack_child_intro);
-		}
 		ui.window.show_all();
+		ui.window.set_focus(Some(&ui.open_entry_password));
 
-
-		App {
-			state: if database_path.is_some() { AppState::OpenDatabasePassword } else { AppState::Intro },
+		let mut app = App {
+			state: if database_path.exists() { AppState::OpenDatabasePassword } else { AppState::CreateDatabasePassword },
 			database: None,
-			database_path: database_path,
+			config: config,
+			config_path: PathBuf::from(config_path),
+			database_path: PathBuf::from(database_path),
 			current_entry_id: None,
 			ui: ui,
 
@@ -294,12 +335,19 @@ impl App {
 
 			database_search: Rc::new(RefCell::new(String::new())),
 			database_model: None,
+		};
+
+		app.update();
+
+		if save_config {
+			app.save_config();
 		}
+
+		app
 	}
 
 	fn update(&mut self) {
 		match self.state {
-			AppState::Intro => self.ui.stack.set_visible_child(&self.ui.stack_child_intro),
 			AppState::OpenDatabasePassword => {
 				self.ui.stack.set_visible_child(&self.ui.stack_child_password);
 				self.ui.open_btn_open.set_label("Open");
@@ -324,6 +372,8 @@ impl App {
 		self.ui.entry_url.set_text(&self.entry_url);
 		self.ui.entry_notes.get_buffer().unwrap().set_text(&self.entry_notes);
 
+		self.ui.menu_entry_syncurl.set_text(&self.config.sync_url);
+
 		// TODO: Be more efficient here
 		let model = self.database.as_ref().map(|db| {
 			let model = create_and_fill_model(db);
@@ -346,10 +396,6 @@ impl App {
 	}
 
 	fn connect_events(&self, master: &EventMaster<Self>) {
-		// Intro
-		connect!(master, self.ui.intro_btn_open, connect_clicked, intro_open_clicked);
-		connect!(master, self.ui.intro_btn_create, connect_clicked, intro_create_clicked);
-
 		// Password
 		connect!(master, self.ui.open_btn_open, connect_clicked, password_btn_clicked);
 		connect!(master, self.ui.open_entry_password, connect_activate, password_btn_clicked);
@@ -374,6 +420,7 @@ impl App {
 		connect!(master, self.ui.menu_btn_close, connect_clicked, menu_close_clicked);
 		connect!(master, self.ui.menu_btn_change_password, connect_clicked, menu_change_password_clicked);
 		connect!(master, self.ui.menu_btn_sync, connect_clicked, menu_sync_clicked);
+		connect!(master, self.ui.menu_entry_syncurl, connect_changed, menu_syncurl_changed);
 
 		// Generate View
 		connect!(master, self.ui.generate_btn_generate, connect_clicked, generate_btn_clicked);
@@ -445,7 +492,7 @@ impl App {
 			self.database.as_mut().unwrap().add_entry(entry);
 		}
 
-		self.database.as_ref().unwrap().save_to_path(self.database_path.as_ref().unwrap()).unwrap();
+		self.database.as_ref().unwrap().save_to_path(&self.database_path).unwrap();
 
 		self.state = AppState::ViewDatabase;
 		self.update();
@@ -456,85 +503,30 @@ impl App {
 
 		match self.state {
 			AppState::OpenDatabasePassword => {
-				self.database = Some(libfortress::Database::load_from_path(self.database_path.as_ref().unwrap(), password).unwrap());
+				self.database = Some(libfortress::Database::load_from_path(&self.database_path, password).unwrap());
 
 				self.state = AppState::ViewDatabase;
 				self.update();
 			},
 			AppState::CreateDatabasePassword => {
-				// Select where to save the new database
-				let dialog = gtk::FileChooserDialog::new(Some("Create Fortress"), Some(&self.ui.window), gtk::FileChooserAction::Save);
+				// TODO: Username
+				let database = libfortress::Database::new_with_password("", password);
+				database.save_to_path(&self.database_path).unwrap();
+				self.database = Some(database);
 
-				dialog.add_buttons(&[
-					("Create", gtk::ResponseType::Ok.into()),
-					("Cancel", gtk::ResponseType::Cancel.into())
-				]);
-
-				dialog.set_select_multiple(false);
-				let response = dialog.run();
-				let ok: i32 = gtk::ResponseType::Ok.into();
-
-				if response == ok {
-					if let Some(file) = dialog.get_filename() {
-						let path = PathBuf::from(file);
-						// TODO: Username
-						let database = libfortress::Database::new_with_password("", password);
-						database.save_to_path(&path).unwrap();
-						self.database = Some(database);
-						self.database_path = Some(path);
-
-						self.state = AppState::ViewDatabase;
-						self.update();
-					} else {
-						self.state = AppState::Intro;
-						self.update();
-					}
-				} else {
-					self.state = AppState::Intro;
-					self.update();
-				}
-				dialog.destroy();
+				self.state = AppState::ViewDatabase;
+				self.update();
 			},
 			AppState::ChangePassword => {
 				let username = self.database.as_ref().unwrap().get_username().to_string();
 				self.database.as_mut().unwrap().change_password(username, password);
-				self.database.as_ref().unwrap().save_to_path(self.database_path.as_ref().unwrap()).unwrap();
+				self.database.as_ref().unwrap().save_to_path(&self.database_path).unwrap();
 
 				self.state = AppState::Menu;
 				self.update();
 			},
 			_ => (),
 		}
-	}
-
-	fn intro_open_clicked(&mut self) {
-		// Select a database file to open
-		let dialog = gtk::FileChooserDialog::new(Some("Open Fortress"), Some(&self.ui.window), gtk::FileChooserAction::Open);
-
-		dialog.add_buttons(&[
-			("Open", gtk::ResponseType::Ok.into()),
-			("Cancel", gtk::ResponseType::Cancel.into())
-		]);
-
-		dialog.set_select_multiple(false);
-		let response = dialog.run();
-		let ok: i32 = gtk::ResponseType::Ok.into();
-
-		if response == ok {
-			if let Some(file) = dialog.get_filename() {
-				self.database_path = Some(PathBuf::from(file));
-				self.ui.window.set_focus(Some(&self.ui.open_entry_password));
-				self.state = AppState::OpenDatabasePassword;
-				self.update();
-			}
-		}
-		dialog.destroy();
-	}
-
-	fn intro_create_clicked(&mut self) {
-		self.state = AppState::CreateDatabasePassword;
-		self.database_path = None;
-		self.update();
 	}
 
 	fn database_menu_clicked(&mut self) {
@@ -553,15 +545,21 @@ impl App {
 	}
 
 	fn menu_sync_clicked(&mut self) {
-		// TODO: Make URL configurable
 		// TODO: Provide visual feedback
-		if self.database.as_mut().unwrap().sync("https://127.0.0.1:9081") {
+		if self.database.as_mut().unwrap().sync(&self.config.sync_url) {
 			// Database changed; save to disk.
-			self.database.as_ref().unwrap().save_to_path(self.database_path.as_ref().unwrap()).unwrap();
+			self.database.as_ref().unwrap().save_to_path(&self.database_path).unwrap();
 		}
 		
 		self.state = AppState::ViewDatabase;
 		self.update();
+	}
+
+	fn menu_syncurl_changed(&mut self) {
+		self.config.sync_url = self.ui.menu_entry_syncurl.get_text().unwrap();
+		// TODO: This function is trigger for every keypress, which means we'd end spamming the filesystem
+		// Probably best to add a debounce or something here.
+		self.save_config();
 	}
 
 	fn entry_close_clicked(&mut self) {
@@ -618,5 +616,15 @@ impl App {
 		if let Some(ref model) = self.database_model {
 			model.refilter();
 		}
+	}
+
+	fn save_config(&self) {
+		// Writes to a temp file and then atomically swaps it over; for fault tolerance.
+		let temp_path = self.config_path.with_extension("tmp");
+		{
+			let writer = File::create(&temp_path).unwrap();
+			serde_json::to_writer(writer, &self.config).unwrap();
+		}
+		fs::rename(&temp_path, &self.config_path).unwrap();
 	}
 }

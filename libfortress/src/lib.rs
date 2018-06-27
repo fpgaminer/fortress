@@ -10,9 +10,9 @@
 // access private properties of the struct.
 //
 // The goal of this library is for users to be confident that, no matter what, data
-// stored in the Database is never unintentionally lost.  By using this methodogly
+// stored in the Database is never unintentionally lost.  By using this methodology
 // of enforcing non-destructive and other invariants we can drastically reduce
-// the probability of bugs violating this intentions.
+// the probability of bugs violating this intention.
 // 
 // 
 // NOTE: Changing any of these structs which derive Serialize/Deserialize requires
