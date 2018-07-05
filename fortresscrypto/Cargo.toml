@@ -3,7 +3,8 @@ authors = ["fpgaminer"]
 name = "fortresscrypto"
 version = "1.0.1"
 license = "MIT/Apache-2.0"
-descrption = "Cryptography helper library for fortress"
+repository = "https://github.com/fpgaminer/fortress"
+description = "Cryptography helper library for fortress"
 
 [dependencies]
 byteorder = "1.0"

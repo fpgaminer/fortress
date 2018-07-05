@@ -4,7 +4,7 @@ name = "fortress"
 version = "1.0.1"
 license = "MIT/Apache-2.0"
 repository = "https://github.com/fpgaminer/fortress"
-descrption = "Password manager"
+description = "Password manager"
 
 [dependencies]
 clap = "2.23"
