@@ -217,6 +217,8 @@ builder_ui!(UiReferences;
 
 	stack_child_password: gtk::Widget,
 	open_btn_open: gtk::Button,
+	open_label_username: gtk::Label,
+	open_entry_username: gtk::Entry,
 	open_entry_password: gtk::Entry,
 
 	stack_child_database: gtk::Widget,
@@ -349,14 +351,20 @@ impl App {
 	fn update(&mut self) {
 		match self.state {
 			AppState::OpenDatabasePassword => {
+				self.ui.open_label_username.hide();
+				self.ui.open_entry_username.hide();
 				self.ui.stack.set_visible_child(&self.ui.stack_child_password);
 				self.ui.open_btn_open.set_label("Open");
 			},
 			AppState::CreateDatabasePassword => {
+				self.ui.open_label_username.show();
+				self.ui.open_entry_username.show();
 				self.ui.stack.set_visible_child(&self.ui.stack_child_password);
 				self.ui.open_btn_open.set_label("Create");
 			},
 			AppState::ChangePassword => {
+				self.ui.open_label_username.show();
+				self.ui.open_entry_username.show();
 				self.ui.stack.set_visible_child(&self.ui.stack_child_password);
 				self.ui.open_btn_open.set_label("Change");
 			},
@@ -499,7 +507,11 @@ impl App {
 	}
 
 	fn password_btn_clicked(&mut self) {
+		let username = self.ui.open_entry_username.get_text().unwrap();
 		let password = self.ui.open_entry_password.get_text().unwrap();
+
+		self.ui.open_entry_username.set_text("");
+		self.ui.open_entry_password.set_text("");
 
 		match self.state {
 			AppState::OpenDatabasePassword => {
@@ -509,8 +521,7 @@ impl App {
 				self.update();
 			},
 			AppState::CreateDatabasePassword => {
-				// TODO: Username
-				let database = libfortress::Database::new_with_password("", password);
+				let database = libfortress::Database::new_with_password(username, password);
 				database.save_to_path(&self.database_path).unwrap();
 				self.database = Some(database);
 
@@ -518,7 +529,6 @@ impl App {
 				self.update();
 			},
 			AppState::ChangePassword => {
-				let username = self.database.as_ref().unwrap().get_username().to_string();
 				self.database.as_mut().unwrap().change_password(username, password);
 				self.database.as_ref().unwrap().save_to_path(&self.database_path).unwrap();
 
@@ -541,6 +551,7 @@ impl App {
 
 	fn menu_change_password_clicked(&mut self) {
 		self.state = AppState::ChangePassword;
+		self.ui.open_entry_username.set_text(self.database.as_ref().unwrap().get_username());
 		self.update();
 	}
 
@@ -557,7 +568,7 @@ impl App {
 
 	fn menu_syncurl_changed(&mut self) {
 		self.config.sync_url = self.ui.menu_entry_syncurl.get_text().unwrap();
-		// TODO: This function is trigger for every keypress, which means we'd end spamming the filesystem
+		// TODO: This function is triggered for every keypress, which means we'd end up spamming the filesystem
 		// Probably best to add a debounce or something here.
 		self.save_config();
 	}
