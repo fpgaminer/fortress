@@ -2,6 +2,8 @@
 authors = ["fpgaminer"]
 name = "libfortress"
 version = "1.0.1"
+license = "MIT/Apache-2.0"
+descrption = "Fortress library"
 
 [dependencies]
 byteorder = "1.0"
