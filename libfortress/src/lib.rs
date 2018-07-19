@@ -170,7 +170,6 @@ impl Database {
 		let payload = serde_json::to_vec(&self)?;
 
 		// Encrypt and write to the temporary file
-		//let mut writer = BufWriter::new(&mut temp_file);
 		fortresscrypto::encrypt_to_file(&mut BufWriter::new(&mut temp_file), &payload, &self.encryption_parameters, &self.file_key_suite)?;
 
 		// Now close the temp file and move it to the destination.
@@ -1067,7 +1066,5 @@ mod tests {
 		assert_eq!(differ, true);
 	}
 
-	// TODO: Test all the failure modes of opening a database
-	// TODO: e.g. make sure corrupting the database file results in a checksum failure, make sure a bad mac results in a MAC failure, etc.
 	// TODO: Add a test that contains a pre-serialized database and which deserializes it to ensure that we don't accidentally change the serialization formats.
 }

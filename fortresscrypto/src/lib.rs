@@ -129,6 +129,10 @@ pub struct FileKeySuite {
 impl FileKeySuite {
 	pub fn derive(password: &[u8], params: &EncryptionParameters) -> FileKeySuite {
 		let mut file_key = [0u8; 32];
+		// TODO: The scrypt crate panics if these parameters aren't valid.  Since
+		// we're reading these from a file it'd be nice if we could instead return an error.
+		// Though this won't happen during normal usage (file checksum makes it pathological to
+		// manually edit the scrypt parameters to something invalid).
 		let scrypt_params = scrypt::ScryptParams::new(params.log_n, params.r, params.p);
 		scrypt::scrypt(password, &params.salt, &scrypt_params, &mut file_key);
 		let file_key = Key(file_key);
@@ -225,8 +229,8 @@ fn parse_header(data: &[u8]) -> io::Result<(EncryptionParameters, &[u8])> {
 	reader.read_until(0, &mut header_string)?;
 
 	// Only v2 is supported
-	if str::from_utf8(&header_string).unwrap() != "fortress2\0" {
-		return Err(io::Error::new(io::ErrorKind::Other, "unsupported format"));
+	if str::from_utf8(&header_string).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "unsupported format"))? != "fortress2\0" {
+		return Err(io::Error::new(io::ErrorKind::InvalidData, "unsupported format"));
 	}
 
 	let log_n = reader.read_u8()?;
@@ -408,8 +412,9 @@ impl Default for EncryptionParameters {
 
 #[cfg(test)]
 mod tests {
-	use super::{Key, MasterKey, LoginKey, FileKeySuite, NetworkKeySuite, deterministic_encryption, deterministic_decryption};
+	use super::{Key, MasterKey, LoginKey, FileKeySuite, NetworkKeySuite, deterministic_encryption, deterministic_decryption, encrypt_to_file, decrypt_from_file, sha256};
 	use rand::{OsRng, Rng};
+	use std::io::Cursor;
 
 	// Test the deterministic encryption functions.
 	#[test]
@@ -502,5 +507,58 @@ mod tests {
 		assert_eq!(plaintext, data);
 
 		assert!(deterministic_decryption(&bad_id, &ciphertext_and_mac, &mac_key, &encryption_key).is_err());
+	}
+
+	// Make sure errors are thrown for the various kinds of file corruption
+	#[test]
+	fn file_corruption() {
+		let mut rng = OsRng::new().expect("OsRng failed to initialize");
+		let payload = b"payloada";
+		let password = b"password";
+		let encryption_parameters = Default::default();
+		let file_key_suite = FileKeySuite::derive(password, &encryption_parameters);
+
+		let encrypted_data = {
+			let mut buffer = Vec::new();
+
+			encrypt_to_file(&mut buffer, payload, &encryption_parameters, &file_key_suite).expect("this shouldn't fail");
+
+			buffer
+		};
+
+		// Run tests a few times (they're random)
+		for _ in 0..64 {
+			let mutation_byte: u8 = rng.gen();
+
+			let truncated = &encrypted_data[..encrypted_data.len() - rng.gen_range(1, encrypted_data.len())];
+			let corrupted_checksum = {
+				let mut buffer = encrypted_data.clone();
+				rng.choose_mut(&mut buffer).map(|x| *x ^= mutation_byte);
+				buffer
+			};
+			let corrupted_mac = {
+				let mut data = (&encrypted_data[..encrypted_data.len()-32]).to_owned();
+				// NOTE: We don't mutate the first couple of bytes where the header is.
+				// This is because it might mutate the scrypt parameters to absurd values, which
+				// can cause the library to spin forever during tests.
+				// TODO: This isn't ideal as we'd like to test corrupting those bits too, but not sure how.
+				rng.choose_mut(&mut data[32..]).map(|x| *x ^= mutation_byte);
+				let checksum = sha256(&data);
+				data.extend_from_slice(&checksum);
+				data
+			};
+
+			assert!(decrypt_from_file(&mut Cursor::new(truncated), password).is_err());
+
+			// Sometimes mutation_byte is 0, which means no corruption happened.  This is a good chance to test our test.
+			if mutation_byte == 0 {
+				assert_eq!(decrypt_from_file(&mut Cursor::new(corrupted_checksum), password).map(|(pt,_,_)| pt).map_err(|_| ()), Ok(payload.to_vec()));
+				assert_eq!(decrypt_from_file(&mut Cursor::new(corrupted_mac), password).map(|(pt,_,_)| pt).map_err(|_| ()), Ok(payload.to_vec()));
+			}
+			else {
+				assert!(decrypt_from_file(&mut Cursor::new(corrupted_checksum), password).is_err());
+				assert!(decrypt_from_file(&mut Cursor::new(corrupted_mac), password).is_err());
+			}
+		}
 	}
 }
