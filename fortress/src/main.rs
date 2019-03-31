@@ -301,7 +301,7 @@ impl App {
 			}, true)
 		};
 
-		let builder = gtk::Builder::new_from_string(include_str!("window.glade"));
+		let builder = gtk::Builder::new_from_string(&include_str!("window.glade"));
 		let ui = UiReferences::from_builder(&builder);
 
 		append_column(&ui.tree, 1);
@@ -314,7 +314,7 @@ impl App {
 		// Apply CSS
 		let screen = ui.window.get_screen().unwrap();
 		let provider = gtk::CssProvider::new();
-		provider.load_from_data(include_str!("style.css")).unwrap();
+		provider.load_from_data(include_bytes!("style.css")).unwrap();
 		gtk::StyleContext::add_provider_for_screen(&screen, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 
 		ui.window.show_all();
