@@ -314,7 +314,7 @@ impl App {
 		// Apply CSS
 		let screen = ui.window.get_screen().unwrap();
 		let provider = gtk::CssProvider::new();
-		provider.load_from_data(include_str!("style.css")).unwrap();
+		provider.load_from_data(include_bytes!("style.css")).unwrap();
 		gtk::StyleContext::add_provider_for_screen(&screen, &provider, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);
 
 		ui.window.show_all();
@@ -481,11 +481,11 @@ impl App {
 	fn entry_save_clicked(&mut self) {
 		let notes_buffer = self.ui.entry_notes.get_buffer().unwrap();
 		let entry_data = libfortress::EntryHistory::new([
-			("title".to_string(), self.ui.entry_title.get_text().unwrap()),
-			("username".to_string(), self.ui.entry_username.get_text().unwrap()),
-			("password".to_string(), self.ui.entry_password.get_text().unwrap()),
-			("url".to_string(), self.ui.entry_url.get_text().unwrap()),
-			("notes".to_string(), notes_buffer.get_text(&notes_buffer.get_start_iter(), &notes_buffer.get_end_iter(), false).unwrap()),
+			("title".to_string(), self.ui.entry_title.get_text().unwrap().to_string()),
+			("username".to_string(), self.ui.entry_username.get_text().unwrap().to_string()),
+			("password".to_string(), self.ui.entry_password.get_text().unwrap().to_string()),
+			("url".to_string(), self.ui.entry_url.get_text().unwrap().to_string()),
+			("notes".to_string(), notes_buffer.get_text(&notes_buffer.get_start_iter(), &notes_buffer.get_end_iter(), false).unwrap().to_string()),
 		].iter().cloned().collect());
 
 		if let Some(entry_id) = self.current_entry_id {
@@ -567,7 +567,7 @@ impl App {
 	}
 
 	fn menu_syncurl_changed(&mut self) {
-		self.config.sync_url = self.ui.menu_entry_syncurl.get_text().unwrap();
+		self.config.sync_url = self.ui.menu_entry_syncurl.get_text().unwrap().to_string();
 		// TODO: This function is triggered for every keypress, which means we'd end up spamming the filesystem
 		// Probably best to add a debounce or something here.
 		self.save_config();
@@ -601,28 +601,28 @@ impl App {
 	}
 
 	fn entry_title_changed(&mut self) {
-		self.entry_title = self.ui.entry_title.get_text().unwrap();
+		self.entry_title = self.ui.entry_title.get_text().unwrap().to_string();
 	}
 
 	fn entry_username_changed(&mut self) {
-		self.entry_username = self.ui.entry_username.get_text().unwrap();
+		self.entry_username = self.ui.entry_username.get_text().unwrap().to_string();
 	}
 
 	fn entry_password_changed(&mut self) {
-		self.entry_password = self.ui.entry_password.get_text().unwrap();
+		self.entry_password = self.ui.entry_password.get_text().unwrap().to_string();
 	}
 
 	fn entry_url_changed(&mut self) {
-		self.entry_url = self.ui.entry_url.get_text().unwrap();
+		self.entry_url = self.ui.entry_url.get_text().unwrap().to_string();
 	}
 
 	fn entry_notes_changed(&mut self) {
 		let notes_buffer = self.ui.entry_notes.get_buffer().unwrap();
-		self.entry_notes = notes_buffer.get_text(&notes_buffer.get_start_iter(), &notes_buffer.get_end_iter(), false).unwrap();
+		self.entry_notes = notes_buffer.get_text(&notes_buffer.get_start_iter(), &notes_buffer.get_end_iter(), false).unwrap().to_string();
 	}
 
 	fn database_search_changed(&mut self) {
-		*self.database_search.borrow_mut() = self.ui.database_entry_search.get_text().unwrap();
+		*self.database_search.borrow_mut() = self.ui.database_entry_search.get_text().unwrap().to_string();
 
 		if let Some(ref model) = self.database_model {
 			model.refilter();
