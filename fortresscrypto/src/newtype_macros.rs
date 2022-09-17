@@ -71,11 +71,19 @@ macro_rules! newtype_traits (($newtype:ident, $len:expr) => (
 		}
 	}
 
+    impl ::subtle::ConstantTimeEq for $newtype {
+        fn ct_eq(&self, other: &Self) -> ::subtle::Choice {
+            let &$newtype(ref v) = self;
+            let &$newtype(ref o) = other;
+            v.ct_eq(o)
+        }
+    }
+
     impl ::std::cmp::PartialEq for $newtype {
-        fn eq(&self, &$newtype(ref other): &$newtype) -> bool {
-			use crypto::util::fixed_time_eq;
-            let &$newtype(ref this) = self;
-			fixed_time_eq(this, other)
+        fn eq(&self, other: &Self) -> bool {
+            use ::subtle::ConstantTimeEq;
+
+            self.ct_eq(other).into()
         }
     }
 
@@ -217,27 +225,6 @@ macro_rules! public_newtype_traits (($newtype:ident) => (
     ));
 
 /// Macro used for generating newtypes of byte-arrays
-///
-/// Usage:
-/// Generating secret datatypes, e.g. keys
-/// new_type! {
-///     /// This is some documentation for our type
-///     secret Key(KEYBYTES);
-/// }
-/// Generating public datatypes, e.g. public keys
-/// ```
-/// new_type! {
-///     /// This is some documentation for our type
-///     public PublicKey(PUBLICKEYBYTES);
-/// }
-/// ```
-/// Generating nonce types
-/// ```
-/// new_type! {
-///     /// This is some documentation for our type
-///     nonce Nonce(NONCEBYTES);
-/// }
-/// ```
 macro_rules! new_type {
     ( $(#[$meta:meta])*
       secret $name:ident($bytes:expr);
@@ -249,13 +236,6 @@ macro_rules! new_type {
         newtype_traits!($name, $bytes);
         impl $name {
             newtype_from_slice!($name, $bytes);
-        }
-        impl Drop for $name {
-            fn drop(&mut self) {
-				use crypto::util::secure_memset;
-                let &mut $name(ref mut v) = self;
-				secure_memset(v, 0);
-            }
         }
         );
     ( $(#[$meta:meta])*

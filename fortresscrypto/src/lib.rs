@@ -1,18 +1,22 @@
 extern crate byteorder;
-extern crate crypto;
+extern crate scrypt;
+extern crate password_hash;
 extern crate rand;
 extern crate data_encoding;
 extern crate serde;
+extern crate subtle;
+extern crate sha2;
+extern crate hmac;
+extern crate chacha20;
 
 #[macro_use] mod newtype_macros;
 
 use byteorder::{ReadBytesExt, WriteBytesExt, LittleEndian};
-use crypto::{scrypt, chacha20};
-use crypto::digest::Digest;
-use crypto::hmac::Hmac;
-use crypto::mac::{Mac, MacResult};
-use crypto::sha2::Sha256;
-use crypto::symmetriccipher::SynchronousStreamCipher;
+use hmac::digest::CtOutput;
+use chacha20::ChaCha20Legacy;
+use chacha20::cipher::{KeyIvInit, StreamCipher};
+use hmac::{Hmac, Mac};
+use sha2::{Sha256, Digest};
 use rand::{OsRng, Rng};
 use std::io::{self, Cursor, Write, BufRead, Read};
 use std::str;
@@ -63,10 +67,10 @@ impl MasterKey {
 	pub fn derive(username: &[u8], password: &[u8]) -> MasterKey {
 		// Use the username as salt for the scrypt function, so attackers can't build a rainbow table to broadly attack users.
 		// Hide username behind hmac so salt is unique to this application.
-		let salt = hmac(&MASTER_KEY_USERNAME_SALT, username).code().to_vec();
+		let salt = hmac(&MASTER_KEY_USERNAME_SALT, username).into_bytes();
 		let mut master_key = [0u8; 32];
-		let scrypt_params = scrypt::ScryptParams::new(MASTER_KEY_SCRYPT_LOG_N, MASTER_KEY_SCRYPT_R, MASTER_KEY_SCRYPT_P);
-		scrypt::scrypt(password, &salt, &scrypt_params, &mut master_key);
+		let scrypt_params = scrypt::Params::new(MASTER_KEY_SCRYPT_LOG_N, MASTER_KEY_SCRYPT_R, MASTER_KEY_SCRYPT_P).expect("scrypt parameters should be valid");
+		scrypt::scrypt(password, &salt, &scrypt_params, &mut master_key).expect("unexpected");
 		MasterKey(master_key)
 	}
 }
@@ -84,7 +88,7 @@ impl LoginKey {
 
 
 pub fn hash_username_for_login(username: &[u8]) -> Vec<u8> {
-	hmac(&LOGIN_USERNAME_SALT, username).code().to_vec()
+	hmac(&LOGIN_USERNAME_SALT, username).into_bytes().to_vec()
 }
 
 
@@ -133,8 +137,8 @@ impl FileKeySuite {
 		// we're reading these from a file it'd be nice if we could instead return an error.
 		// Though this won't happen during normal usage (file checksum makes it pathological to
 		// manually edit the scrypt parameters to something invalid).
-		let scrypt_params = scrypt::ScryptParams::new(params.log_n, params.r, params.p);
-		scrypt::scrypt(password, &params.salt, &scrypt_params, &mut file_key);
+		let scrypt_params = scrypt::Params::new(params.log_n, params.r, params.p).unwrap();
+		scrypt::scrypt(password, &params.salt, &scrypt_params, &mut file_key).expect("unexpected");
 		let file_key = Key(file_key);
 
 		FileKeySuite {
@@ -198,9 +202,9 @@ pub fn encrypt_to_file<W: Write>(writer: &mut W, data: &[u8], params: &Encryptio
 	let hash = {
 		let mut hash = [0u8; 32];
 		let mut hasher = Sha256::new();
-		hasher.input(&header);
-		hasher.input(&ciphertext);
-		hasher.result(&mut hash);
+		hasher.update(&header);
+		hasher.update(&ciphertext);
+		hasher.finalize_into((&mut hash).into());
 		hash
 	};
 
@@ -282,12 +286,12 @@ impl DerivativeKeyId {
 }
 
 fn derive_key(parent_key: &Key, child_id: DerivativeKeyId) -> Key {
-	Key::from_slice(hmac(parent_key, child_id.salt()).code()).unwrap()
+	Key::from_slice(&hmac(parent_key, child_id.salt()).into_bytes()).unwrap()
 }
 
 
 fn derive_deterministic_encryption_key(encryption_key: &Key, salt: &[u8]) -> Key {
-	let salted_encryption_key = hmac(encryption_key, &salt[..32]).code().to_vec();
+	let salted_encryption_key = hmac(encryption_key, &salt[..32]).into_bytes();
 	Key::from_slice(&salted_encryption_key).unwrap()
 }
 
@@ -300,7 +304,7 @@ fn derive_deterministic_encryption_key(encryption_key: &Key, salt: &[u8]) -> Key
 // During decryption we validate the MAC first, which prevents attackers from manipulating our algorithm.
 // id is included in the MAC calculation, but it is not included as part of ciphertext.
 fn deterministic_encryption(id: &[u8], plaintext: &[u8], salt_key: &Key, mac_key: &Key, encryption_key: &Key) -> (Vec<u8>, MacTag) {
-	let salt = hmac(salt_key, plaintext).code().to_vec();
+	let salt = hmac(salt_key, plaintext).into_bytes();
 	let salted_encryption_key = derive_deterministic_encryption_key(encryption_key, &salt);
 	let mut ciphertext = chacha20_process(&salted_encryption_key, plaintext);
 
@@ -309,10 +313,10 @@ fn deterministic_encryption(id: &[u8], plaintext: &[u8], salt_key: &Key, mac_key
 	result.append(&mut ciphertext);
 
 	let mac = {
-		let mut hmac = Hmac::new(Sha256::new(), &mac_key[..]);
-		hmac.input(id);
-		hmac.input(&result);
-		MacTag::from_slice(hmac.result().code()).unwrap()
+		let mut hmac = Hmac::<Sha256>::new_from_slice(&mac_key[..]).expect("unexpected");
+		hmac.update(id);
+		hmac.update(&result);
+		MacTag::from_slice(&hmac.finalize().into_bytes()).unwrap()
 	};
 
 	(result, mac)
@@ -327,12 +331,12 @@ fn deterministic_decryption(id: &[u8], payload: &[u8], mac_key: &Key, encryption
 	}
 
 	let salt_and_ciphertext = &payload[..payload.len()-32];
-	let mac = MacResult::new(&payload[payload.len()-32..]);
+	let mac = CtOutput::new(hmac::digest::Output::<Hmac<Sha256>>::clone_from_slice(&payload[payload.len()-32..]));
 	let calculated_mac = {
-		let mut hmac = Hmac::new(Sha256::new(), &mac_key[..]);
-		hmac.input(id);
-		hmac.input(salt_and_ciphertext);
-		hmac.result()
+		let mut hmac = Hmac::<Sha256>::new_from_slice(&mac_key[..]).expect("unexpected");
+		hmac.update(id);
+		hmac.update(salt_and_ciphertext);
+		hmac.finalize()
 	};
 
 	if calculated_mac != mac {
@@ -352,23 +356,23 @@ fn deterministic_decryption(id: &[u8], payload: &[u8], mac_key: &Key, encryption
 fn sha256(input: &[u8]) -> [u8; 32] {
 	let mut hash = [0u8; 32];
 	let mut hasher = Sha256::new();
-	hasher.input(input);
-	hasher.result(&mut hash);
+	hasher.update(input);
+	hasher.finalize_into((&mut hash).into());
 	hash
 }
 
 
-fn hmac(key: &Key, data: &[u8]) -> MacResult {
-	let mut hmac = Hmac::new(Sha256::new(), &key[..]);
-	hmac.input(data);
-	hmac.result()
+fn hmac(key: &Key, data: &[u8]) -> CtOutput<Hmac<Sha256>> {
+	let mut hmac = Hmac::<Sha256>::new_from_slice(&key[..]).expect("unexpected");
+	hmac.update(data);
+	hmac.finalize()
 }
 
 
 fn chacha20_process(key: &Key, data: &[u8]) -> Vec<u8> {
-	let mut result = vec![0u8; data.len()];
-	let mut chacha = chacha20::ChaCha20::new(&key[..], &[0,0,0,0,0,0,0,0]);
-	chacha.process(data, &mut result);
+	let mut result = data.to_vec();
+	let mut chacha = ChaCha20Legacy::new(chacha20::Key::from_slice(&key[..]), &[0,0,0,0,0,0,0,0].into());
+	chacha.apply_keystream(&mut result);
 	result
 }
 

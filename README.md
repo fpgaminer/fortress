@@ -59,7 +59,7 @@ To decrypt scrypt-chacha20:
 
 We use scrypt to derive a `master_key` and then use PBKDF2 to expand the `master_key` into all the keys we need for the rest of the cryptographic primitives; in this case ChaCha20 and HMAC.  (See the description of encryption for why PBKDF2 is used after scrypt).
 
-The `checksum` field lets us determine if the database is corrupt.  HMAC kinda does that can't differentiate a bad password versus corruption.
+The `checksum` field lets us determine if the database is corrupt.  HMAC kinda does that, but can't differentiate a bad password versus corruption.
 
 Of course, `mac_tag` must **always** be checked before proceeding to chacha20_decrypt.
 
