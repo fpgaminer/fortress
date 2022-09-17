@@ -108,7 +108,7 @@ macro_rules! newtype_traits (($newtype:ident, $len:expr) => (
 				fn expecting(&self, formatter: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
 					write!(formatter, stringify!($newtype))
 				}
-				
+
                 fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
                     where E: ::serde::de::Error
                 {

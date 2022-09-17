@@ -1,6 +1,6 @@
+use super::super::{serde, unix_timestamp, Database, ID};
 use rand::{OsRng, Rng};
 use std::collections::HashSet;
-use super::super::{serde, ID, Database, unix_timestamp};
 
 
 // A directory is a list of references to Entries and Directories, much like a filesystem directory.
@@ -39,11 +39,15 @@ impl Directory {
 			min_next_timestamp = history_item.time + 1;
 
 			match history_item.action {
-				DirectoryHistoryAction::Add => if !entries.insert(history_item.id) {
-					return None;
+				DirectoryHistoryAction::Add => {
+					if !entries.insert(history_item.id) {
+						return None;
+					}
 				},
-				DirectoryHistoryAction::Remove => if !entries.remove(&history_item.id) {
-					return None;
+				DirectoryHistoryAction::Remove => {
+					if !entries.remove(&history_item.id) {
+						return None;
+					}
 				},
 			};
 		}
@@ -109,9 +113,7 @@ impl Directory {
 
 	// List all Entry entries in this directory
 	pub fn list_entries<'a>(&'a self, database: &Database) -> Vec<&'a ID> {
-		self.entries.iter().filter(|id| {
-			database.get_entry_by_id(id).is_some()
-		}).collect()
+		self.entries.iter().filter(|id| database.get_entry_by_id(id).is_some()).collect()
 	}
 
 	// Merge self and other, returning a new Directory
@@ -168,7 +170,7 @@ impl<'de> serde::Deserialize<'de> for Directory {
 		}
 
 		let d: DirectoryDeserialized = serde::Deserialize::deserialize(deserializer)?;
-		
+
 		// Re-builds state and validates
 		Directory::from_history(d.id, d.history).ok_or(serde::de::Error::custom("Invalid history"))
 	}
@@ -178,7 +180,7 @@ impl<'de> serde::Deserialize<'de> for Directory {
 pub struct DirectoryHistory {
 	pub id: ID,
 	pub action: DirectoryHistoryAction,
-	pub time: u64,    // Unix timestamp for when this edit occured (nanoseconds)
+	pub time: u64, // Unix timestamp for when this edit occured (nanoseconds)
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone)]
@@ -190,10 +192,10 @@ pub enum DirectoryHistoryAction {
 
 #[cfg(test)]
 mod tests {
-	use rand::{OsRng, Rng};
-	use serde_json;
 	use super::{Directory, DirectoryHistory, DirectoryHistoryAction};
 	use crate::tests::quick_sleep;
+	use rand::{OsRng, Rng};
+	use serde_json;
 
 	#[test]
 	fn history_must_be_ordered() {
@@ -202,11 +204,15 @@ mod tests {
 		let mut bad_directory1 = Directory::new();
 		bad_directory1.history = vec![
 			DirectoryHistory {
-				id: rng.gen(), action: DirectoryHistoryAction::Add, time: 50,
+				id: rng.gen(),
+				action: DirectoryHistoryAction::Add,
+				time: 50,
 			},
 			DirectoryHistory {
-				id: rng.gen(), action: DirectoryHistoryAction::Add, time: 0,
-			}
+				id: rng.gen(),
+				action: DirectoryHistoryAction::Add,
+				time: 0,
+			},
 		];
 
 		let serialized = serde_json::to_string(&bad_directory1).unwrap();
@@ -223,11 +229,15 @@ mod tests {
 			let id1 = rng.gen();
 			bad_directory.history = vec![
 				DirectoryHistory {
-					id: id1, action: DirectoryHistoryAction::Add, time: 0,
+					id: id1,
+					action: DirectoryHistoryAction::Add,
+					time: 0,
 				},
 				DirectoryHistory {
-					id: id1, action: DirectoryHistoryAction::Add, time: 5,
-				}
+					id: id1,
+					action: DirectoryHistoryAction::Add,
+					time: 5,
+				},
 			];
 
 			let serialized = serde_json::to_string(&bad_directory).unwrap();
@@ -236,11 +246,11 @@ mod tests {
 
 		{
 			let mut bad_directory = Directory::new();
-			bad_directory.history = vec![
-				DirectoryHistory {
-					id: rng.gen(), action: DirectoryHistoryAction::Remove, time: 0,
-				},
-			];
+			bad_directory.history = vec![DirectoryHistory {
+				id: rng.gen(),
+				action: DirectoryHistoryAction::Remove,
+				time: 0,
+			}];
 
 			let serialized = serde_json::to_string(&bad_directory).unwrap();
 			assert!(serde_json::from_str::<Directory>(&serialized).is_err());

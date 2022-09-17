@@ -13,49 +13,52 @@
 // stored in the Database is never unintentionally lost.  By using this methodology
 // of enforcing non-destructive and other invariants we can drastically reduce
 // the probability of bugs violating this intention.
-// 
-// 
+//
+//
 // NOTE: Changing any of these structs which derive Serialize/Deserialize requires
 // bumping the database format version.
-// 
+//
 // NOTE: No versioning is currently included for cloud objects.  The plan is to
-// add versioning the next time the format changes, and to change the way the 
+// add versioning the next time the format changes, and to change the way the
 // network and login keys are calculated to prevent old versions from syncing.
 // We can then have a plan for more graceful versioning going forward.
 extern crate rand;
 #[macro_use]
 extern crate serde_derive;
-extern crate serde;
-extern crate serde_json;
-extern crate data_encoding;
 extern crate byteorder;
-extern crate tempfile;
+extern crate data_encoding;
 pub extern crate fortresscrypto;
 extern crate reqwest;
+extern crate serde;
+extern crate serde_json;
 extern crate subtle;
+extern crate tempfile;
 
-#[macro_use] mod newtype_macros;
+#[macro_use]
+mod newtype_macros;
 mod database_object;
 mod database_object_map;
 pub mod sync_parameters;
 
 pub use database_object::{Directory, Entry, EntryHistory};
 
-use rand::{OsRng, Rng};
-use std::collections::HashSet;
-use std::fs::File;
-use std::io::{self, BufReader, BufWriter};
-use std::path::Path;
-use std::str;
-use fortresscrypto::{EncryptionParameters, FileKeySuite, LoginKey, MacTag};
 use database_object::DatabaseObject;
 use database_object_map::DatabaseObjectMap;
-use sync_parameters::{SyncParameters, LoginId};
-use reqwest::{Url, IntoUrl};
+use fortresscrypto::{EncryptionParameters, FileKeySuite, LoginKey, MacTag};
+use rand::{OsRng, Rng};
+use reqwest::{IntoUrl, Url};
+use std::{
+	collections::HashSet,
+	fs::File,
+	io::{self, BufReader, BufWriter},
+	path::Path,
+	str,
+};
+use sync_parameters::{LoginId, SyncParameters};
 use tempfile::NamedTempFile;
 
 
-new_type!{
+new_type! {
 	public ID(32);
 }
 
@@ -73,7 +76,7 @@ pub struct Database {
 	#[serde(skip_serializing, skip_deserializing)]
 	file_key_suite: FileKeySuite,
 	#[serde(skip_serializing, skip_deserializing)]
-	pub do_not_set_testing: bool,     // DO NOT SET TO true; used only during integration testing.
+	pub do_not_set_testing: bool, // DO NOT SET TO true; used only during integration testing.
 }
 
 impl Database {
@@ -198,7 +201,7 @@ impl Database {
 
 			fortresscrypto::decrypt_from_file(&mut reader, password.as_bytes())?
 		};
-		
+
 		// Deserialize
 		let db: SerializableDatabase = serde_json::from_slice(&plaintext)?;
 
@@ -224,7 +227,7 @@ impl Database {
 	pub fn sync<U: IntoUrl>(&mut self, url: U) -> bool {
 		let mut url = url.into_url().unwrap();
 		if self.do_not_set_testing == false {
-			url.set_scheme("https").unwrap();	// Force SSL
+			url.set_scheme("https").unwrap(); // Force SSL
 		}
 		let client = reqwest::blocking::Client::new();
 
@@ -235,8 +238,7 @@ impl Database {
 		for unknown_id in &unknown_ids {
 			if let Some(object) = self.objects.get(unknown_id) {
 				self.sync_api_update_object(&client, &url, object).unwrap();
-			}
-			else {
+			} else {
 				println!("WARNING: Server named an unknown_id that we don't have in our database: {:?}", unknown_id);
 			}
 		}
@@ -277,7 +279,7 @@ impl Database {
 					Ok(_) => (),
 					Err(err) => {
 						println!("WARNING: Error uploading object to server: {:?}", err);
-					}
+					},
 				}
 			}
 		}
@@ -288,11 +290,12 @@ impl Database {
 	// Upload object to fortress server
 	fn sync_api_update_object(&self, client: &reqwest::blocking::Client, url: &Url, object: &DatabaseObject) -> Result<(), ApiError> {
 		#[derive(Serialize, Debug)]
-		struct UpdateObjectRequest<'a,'b,'c,'d,'e> {
+		struct UpdateObjectRequest<'a, 'b, 'c, 'd, 'e> {
 			user_id: &'a LoginId,
 			user_key: &'b LoginKey,
 			object_id: &'c ID,
-			#[serde(with = "hex_format")] data: &'d [u8],
+			#[serde(with = "hex_format")]
+			data: &'d [u8],
 			data_mac: &'e MacTag,
 		}
 
@@ -318,7 +321,7 @@ impl Database {
 	// Returns updates and IDs unknown to the server.
 	fn sync_api_diff_objects(&self, client: &reqwest::blocking::Client, url: &Url) -> Result<(Vec<DiffObjectResponseUpdate>, Vec<ID>), ApiError> {
 		#[derive(Serialize)]
-		struct DiffObjectRequest<'a,'b,'c> {
+		struct DiffObjectRequest<'a, 'b, 'c> {
 			user_id: &'a LoginId,
 			user_key: &'b LoginKey,
 			objects: Vec<DiffObjectRequestObject<'c>>,
@@ -348,10 +351,7 @@ impl Database {
 			let payload = serde_json::to_vec(object).unwrap();
 			let (_, mac) = self.sync_parameters.get_network_key_suite().encrypt_object(&id[..], &payload);
 
-			diff_object_request.objects.push(DiffObjectRequestObject {
-				id: id,
-				mac: mac,
-			});
+			diff_object_request.objects.push(DiffObjectRequestObject { id: id, mac: mac });
 		}
 
 		let response: DiffObjectResponse = api_request(&client, url.join("/diff_objects").unwrap(), &diff_object_request)?;
@@ -363,7 +363,7 @@ impl Database {
 	// If the object doesn't exist on the server or could not be decrypted then None is returned.
 	fn sync_api_get_object(&self, client: &reqwest::blocking::Client, url: &Url, id: &ID) -> Result<Option<DatabaseObject>, ApiError> {
 		#[derive(Serialize)]
-		struct GetObjectRequest<'a,'b,'c> {
+		struct GetObjectRequest<'a, 'b, 'c> {
 			user_id: &'a LoginId,
 			user_key: &'b LoginKey,
 			object_id: &'c ID,
@@ -386,13 +386,11 @@ impl Database {
 		let ciphertext = [&response.data[..], &response.mac[..]].concat();
 
 		match self.sync_parameters.get_network_key_suite().decrypt_object(&id[..], &ciphertext) {
-			Ok(plaintext) => {
-				Ok(Some(serde_json::from_slice(&plaintext).unwrap()))
-			},
+			Ok(plaintext) => Ok(Some(serde_json::from_slice(&plaintext).unwrap())),
 			Err(err) => {
 				println!("WARNING: Error while decrypting server object(ID: {:?}): {}", id, err);
 				Ok(None)
-			}
+			},
 		}
 	}
 
@@ -407,7 +405,7 @@ impl Database {
 			// Get local object
 			let local_object = match self.objects.get(&update.id) {
 				Some(object) => object,
-				None => continue,	// Ignore server's weirdness
+				None => continue, // Ignore server's weirdness
 			};
 
 			// Decrypt
@@ -422,7 +420,7 @@ impl Database {
 						// Fix using our copy
 						reuploads.push(local_object);
 						continue;
-					}
+					},
 				}
 			};
 
@@ -484,7 +482,13 @@ impl Database {
 
 	// Merge a directory update and also download new objects resulting from the merge
 	// If we fail to download any of the new objects this function will return an empty vector
-	fn sync_merge_directory_and_recurse(&self, client: &reqwest::blocking::Client, url: &Url, local_directory: &Directory, server_directory: &Directory) -> Vec<(DatabaseObject, bool)> {
+	fn sync_merge_directory_and_recurse(
+		&self,
+		client: &reqwest::blocking::Client,
+		url: &Url,
+		local_directory: &Directory,
+		server_directory: &Directory,
+	) -> Vec<(DatabaseObject, bool)> {
 		let mut queued_updates = Vec::new();
 
 		let (new_directory, new_ids, should_upload) = sync_merge_directory(local_directory, server_directory, &self.objects);
@@ -498,11 +502,11 @@ impl Database {
 				},
 				Ok(None) => {
 					println!("WARNING: Missing object from server ({:?})", new_id);
-					return Vec::new();  // Back out of merging the directory, it would be incomplete otherwise
+					return Vec::new(); // Back out of merging the directory, it would be incomplete otherwise
 				},
 				Err(err) => {
 					println!("WARNING: Error fetching object from server ({:?}): {:?}", new_id, err);
-					return Vec::new();  // Back out of merging the directory, it would be incomplete otherwise
+					return Vec::new(); // Back out of merging the directory, it would be incomplete otherwise
 				},
 			}
 		}
@@ -548,14 +552,13 @@ impl From<reqwest::Error> for ApiError {
 // The way we handle that is with a generic, flattened enum ApiErrorResponse.
 // This is a bit awkward; is there a better solution?
 fn api_request<U, T, R>(client: &reqwest::blocking::Client, url: U, request: &T) -> Result<R, ApiError>
-	where U: IntoUrl,
-	      T: serde::ser::Serialize + ?Sized,
-	      R: serde::de::DeserializeOwned
+where
+	U: IntoUrl,
+	T: serde::ser::Serialize + ?Sized,
+	R: serde::de::DeserializeOwned,
 {
-	let response = client.post(url)
-		.json(request)
-		.send()?;
-	
+	let response = client.post(url).json(request).send()?;
+
 	let response: ApiErrorResponse<R> = response.error_for_status()?.json()?;
 
 	match response {
@@ -598,16 +601,18 @@ fn sync_merge_directory(local_directory: &Directory, server_directory: &Director
 
 mod hex_format {
 	use data_encoding::HEXLOWER_PERMISSIVE;
-	use serde::{self, Deserialize, Serializer, Deserializer};
+	use serde::{self, Deserialize, Deserializer, Serializer};
 
 	pub fn serialize<S>(data: &[u8], serializer: S) -> Result<S::Ok, S::Error>
-		where S: Serializer
+	where
+		S: Serializer,
 	{
 		serializer.serialize_str(&HEXLOWER_PERMISSIVE.encode(data))
 	}
 
 	pub fn deserialize<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-		where D: Deserializer<'de>
+	where
+		D: Deserializer<'de>,
 	{
 		let s = String::deserialize(deserializer)?;
 		HEXLOWER_PERMISSIVE.decode(s.as_bytes()).map_err(serde::de::Error::custom)
@@ -658,13 +663,18 @@ pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: b
 // NOTE: This will panic if used past ~2500 C.E. (Y2K taught me nothing).
 fn unix_timestamp() -> u64 {
 	let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
-	timestamp.as_secs().checked_mul(1000000000).unwrap().checked_add(timestamp.subsec_nanos() as u64).unwrap()
+	timestamp
+		.as_secs()
+		.checked_mul(1000000000)
+		.unwrap()
+		.checked_add(timestamp.subsec_nanos() as u64)
+		.unwrap()
 }
 
 
 #[cfg(test)]
 mod tests {
-	use super::{Database, DatabaseObject, Directory, random_string, Entry, EntryHistory, ID, serde_json};
+	use super::{random_string, serde_json, Database, DatabaseObject, Directory, Entry, EntryHistory, ID};
 	use rand::{OsRng, Rng};
 	use std::collections::HashMap;
 	use tempfile::tempdir;
@@ -703,9 +713,9 @@ mod tests {
 
 		let mut entry = Entry::new();
 		entry.edit(EntryHistory::new(HashMap::new()));
-		entry.edit(EntryHistory::new([
-			("title".to_string(), "Password change".to_string()),
-			].iter().cloned().collect()));
+		entry.edit(EntryHistory::new(
+			[("title".to_string(), "Password change".to_string())].iter().cloned().collect(),
+		));
 		db.add_entry(entry);
 
 		// Save
@@ -820,17 +830,42 @@ mod tests {
 
 		let mut entry = Entry::new();
 		entry.edit(EntryHistory::new(HashMap::new()));
-		entry.edit(EntryHistory::new([
-			(rng.gen_iter::<char>().take(256).collect::<String>(), rng.gen_iter::<char>().take(256).collect::<String>()),
-			(rng.gen_iter::<char>().take(256).collect::<String>(), rng.gen_iter::<char>().take(256).collect::<String>()),
-			(a.clone(), b.clone()),
-			].iter().cloned().collect()));
-		entry.edit(EntryHistory::new([
-			(rng.gen_iter::<char>().take(256).collect::<String>(), rng.gen_iter::<char>().take(256).collect::<String>()),
-			(rng.gen_iter::<char>().take(256).collect::<String>(), rng.gen_iter::<char>().take(256).collect::<String>()),
-			(rng.gen_iter::<char>().take(256).collect::<String>(), rng.gen_iter::<char>().take(256).collect::<String>()),
-			(a.clone(), c.clone()),
-			].iter().cloned().collect()));
+		entry.edit(EntryHistory::new(
+			[
+				(
+					rng.gen_iter::<char>().take(256).collect::<String>(),
+					rng.gen_iter::<char>().take(256).collect::<String>(),
+				),
+				(
+					rng.gen_iter::<char>().take(256).collect::<String>(),
+					rng.gen_iter::<char>().take(256).collect::<String>(),
+				),
+				(a.clone(), b.clone()),
+			]
+			.iter()
+			.cloned()
+			.collect(),
+		));
+		entry.edit(EntryHistory::new(
+			[
+				(
+					rng.gen_iter::<char>().take(256).collect::<String>(),
+					rng.gen_iter::<char>().take(256).collect::<String>(),
+				),
+				(
+					rng.gen_iter::<char>().take(256).collect::<String>(),
+					rng.gen_iter::<char>().take(256).collect::<String>(),
+				),
+				(
+					rng.gen_iter::<char>().take(256).collect::<String>(),
+					rng.gen_iter::<char>().take(256).collect::<String>(),
+				),
+				(a.clone(), c.clone()),
+			]
+			.iter()
+			.cloned()
+			.collect(),
+		));
 		db.add_entry(entry);
 
 		// Save
@@ -897,24 +932,33 @@ mod tests {
 
 		let mut entry = Entry::new();
 		entry.edit(EntryHistory::new(HashMap::new()));
-		entry.edit(EntryHistory::new([
-			("title".to_string(), "Test test".to_string()),
-			("username".to_string(), "Username".to_string())
-			].iter().cloned().collect()));
+		entry.edit(EntryHistory::new(
+			[("title".to_string(), "Test test".to_string()), ("username".to_string(), "Username".to_string())]
+				.iter()
+				.cloned()
+				.collect(),
+		));
 		db.add_entry(entry);
 
 		let mut entry = Entry::new();
 		let tmp_entry_id = entry.get_id().clone();
 		entry.edit(EntryHistory::new(HashMap::new()));
-		entry.edit(EntryHistory::new([
-			("title".to_string(), "Test test".to_string()),
-			("username".to_string(), "Username".to_string()),
-			].iter().cloned().collect()));
-		entry.edit(EntryHistory::new([
-			("username".to_string(), "Username".to_string()),
-			("title".to_string(), "Ooops".to_string()),
-			("password".to_string(), "Password".to_string()),
-			].iter().cloned().collect()));
+		entry.edit(EntryHistory::new(
+			[("title".to_string(), "Test test".to_string()), ("username".to_string(), "Username".to_string())]
+				.iter()
+				.cloned()
+				.collect(),
+		));
+		entry.edit(EntryHistory::new(
+			[
+				("username".to_string(), "Username".to_string()),
+				("title".to_string(), "Ooops".to_string()),
+				("password".to_string(), "Password".to_string()),
+			]
+			.iter()
+			.cloned()
+			.collect(),
+		));
 		db.add_entry(entry);
 
 		db.get_root_mut().remove(tmp_entry_id.clone());
@@ -928,17 +972,22 @@ mod tests {
 		assert_eq!(db, db2);
 
 		// Edit
-		let entry_id: ID = **db2.get_root().list_entries(&db2).iter().find(|id| {
-			let entry = db2.get_entry_by_id(id).unwrap();
+		let entry_id: ID = **db2
+			.get_root()
+			.list_entries(&db2)
+			.iter()
+			.find(|id| {
+				let entry = db2.get_entry_by_id(id).unwrap();
 
-			entry.get("title") == None
-		}).unwrap();
+				entry.get("title") == None
+			})
+			.unwrap();
 
 		{
 			let entry = db2.get_entry_by_id_mut(&entry_id).unwrap();
-			entry.edit(EntryHistory::new([
-				("title".to_string(), "Forgot this one".to_string()),
-				].iter().cloned().collect()));
+			entry.edit(EntryHistory::new(
+				[("title".to_string(), "Forgot this one".to_string())].iter().cloned().collect(),
+			));
 		}
 
 		// Save
@@ -968,10 +1017,10 @@ mod tests {
 					assert_eq!(entry.get_history()[1].data["username"], "Username");
 					assert_eq!(entry.get_history()[2].data.get("username"), None);
 					assert_eq!(entry.get_history()[1]["title"], "Test test");
-				}
+				},
 				_ => {
 					panic!("Unknown title");
-				}
+				},
 			}
 		}
 	}
@@ -982,16 +1031,23 @@ mod tests {
 		// Create entry
 		let mut entry = Entry::new();
 		entry.edit(EntryHistory::new(HashMap::new()));
-		entry.edit(EntryHistory::new([
-			("title".to_string(), "Serialization".to_string()),
-			("username".to_string(), "Foo".to_string()),
-			("password".to_string(), "password".to_string()),
-			("url".to_string(), "Url".to_string()),
-			].iter().cloned().collect()));
-		entry.edit(EntryHistory::new([
-			("title".to_string(), "Title change".to_string()),
-			("url".to_string(), "Url change".to_string()),
-			].iter().cloned().collect()));
+		entry.edit(EntryHistory::new(
+			[
+				("title".to_string(), "Serialization".to_string()),
+				("username".to_string(), "Foo".to_string()),
+				("password".to_string(), "password".to_string()),
+				("url".to_string(), "Url".to_string()),
+			]
+			.iter()
+			.cloned()
+			.collect(),
+		));
+		entry.edit(EntryHistory::new(
+			[("title".to_string(), "Title change".to_string()), ("url".to_string(), "Url change".to_string())]
+				.iter()
+				.cloned()
+				.collect(),
+		));
 
 		let object = DatabaseObject::Entry(entry);
 

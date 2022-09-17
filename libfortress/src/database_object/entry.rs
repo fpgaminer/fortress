@@ -1,10 +1,12 @@
+use super::super::{serde, unix_timestamp, ID};
 use rand::{OsRng, Rng};
-use super::super::{serde, ID, unix_timestamp};
-use std::collections::{HashMap, BTreeMap};
-use std::hash::Hash;
-use std::borrow::Borrow;
-use std::ops::Index;
-use std::cmp;
+use std::{
+	borrow::Borrow,
+	cmp,
+	collections::{BTreeMap, HashMap},
+	hash::Hash,
+	ops::Index,
+};
 
 
 // History is always ordered (by timestamp).
@@ -12,7 +14,7 @@ use std::cmp;
 pub struct Entry {
 	id: ID,
 	history: Vec<EntryHistory>,
-	time_created: u64,    // Unix timestamp for when this entry was created (nanoseconds)
+	time_created: u64, // Unix timestamp for when this entry was created (nanoseconds)
 
 	// The current state of the entry
 	#[serde(skip_serializing, skip_deserializing)]
@@ -35,7 +37,7 @@ impl Entry {
 			state: HashMap::new(),
 		};
 		let mut min_next_timestamp = 0;
-		
+
 		for history_item in &history {
 			// History must be ordered
 			if history_item.time < min_next_timestamp || history_item.time == <u64>::max_value() {
@@ -63,8 +65,9 @@ impl Entry {
 	}
 
 	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&String>
-		where Q: Hash + Eq,
-			  String: Borrow<Q>
+	where
+		Q: Hash + Eq,
+		String: Borrow<Q>,
 	{
 		self.state.get(key)
 	}
@@ -138,8 +141,9 @@ impl Entry {
 }
 
 impl<'a, Q: ?Sized> Index<&'a Q> for Entry
-	where Q: Eq + Hash,
-		  String: Borrow<Q>
+where
+	Q: Eq + Hash,
+	String: Borrow<Q>,
 {
 	type Output = String;
 
@@ -170,7 +174,7 @@ impl<'de> serde::Deserialize<'de> for Entry {
 
 #[derive(Clone, Serialize, Deserialize, Eq, PartialEq, Debug)]
 pub struct EntryHistory {
-	pub time: u64,    // Unix timestamp for when this edit occured (nanoseconds)
+	pub time: u64, // Unix timestamp for when this edit occured (nanoseconds)
 	#[serde(serialize_with = "ordered_map")]
 	pub data: HashMap<String, String>,
 }
@@ -184,16 +188,18 @@ impl EntryHistory {
 	}
 
 	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&String>
-		where Q: Hash + Eq,
-			  String: Borrow<Q>
+	where
+		Q: Hash + Eq,
+		String: Borrow<Q>,
 	{
 		self.data.get(key)
 	}
 }
 
 impl<'a, Q: ?Sized> Index<&'a Q> for EntryHistory
-	where Q: Eq + Hash,
-		  String: Borrow<Q>
+where
+	Q: Eq + Hash,
+	String: Borrow<Q>,
 {
 	type Output = String;
 
@@ -206,9 +212,10 @@ impl<'a, Q: ?Sized> Index<&'a Q> for EntryHistory
 // We have to use this so that the serialization for EntryHistory is deterministic (always the same for the same input).
 // If we didn't, the serialized form would change each time, which would cause problems for synchronization.
 fn ordered_map<S, K, V>(value: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S::Error>
-	where S: serde::Serializer,
-	      K: Eq + Hash + Ord + serde::Serialize,
-		  V: serde::Serialize
+where
+	S: serde::Serializer,
+	K: Eq + Hash + Ord + serde::Serialize,
+	V: serde::Serialize,
 {
 	use serde::Serialize;
 
@@ -219,17 +226,26 @@ fn ordered_map<S, K, V>(value: &HashMap<K, V>, serializer: S) -> Result<S::Ok, S
 
 #[cfg(test)]
 mod tests {
+	use super::{Entry, EntryHistory};
 	use rand::{OsRng, Rng};
 	use serde_json;
-	use super::{Entry, EntryHistory};
-	use ::unix_timestamp;
+	use unix_timestamp;
 
 	fn random_entry_history<T: Rng>(rng: &mut T, time: Option<u64>) -> EntryHistory {
 		EntryHistory {
 			data: [
-				(rng.gen_iter::<char>().take(256).collect::<String>(), rng.gen_iter::<char>().take(256).collect::<String>()),
-				(rng.gen_iter::<char>().take(256).collect::<String>(), rng.gen_iter::<char>().take(256).collect::<String>()),
-			].iter().cloned().collect(),
+				(
+					rng.gen_iter::<char>().take(256).collect::<String>(),
+					rng.gen_iter::<char>().take(256).collect::<String>(),
+				),
+				(
+					rng.gen_iter::<char>().take(256).collect::<String>(),
+					rng.gen_iter::<char>().take(256).collect::<String>(),
+				),
+			]
+			.iter()
+			.cloned()
+			.collect(),
 			time: time.unwrap_or(unix_timestamp()),
 		}
 	}
@@ -239,10 +255,7 @@ mod tests {
 		let mut rng = OsRng::new().expect("OsRng failed to initialize");
 
 		let mut entry = Entry::new();
-		entry.history = vec![
-			random_entry_history(&mut rng, Some(50)),
-			random_entry_history(&mut rng, Some(0)),
-		];
+		entry.history = vec![random_entry_history(&mut rng, Some(50)), random_entry_history(&mut rng, Some(0))];
 
 		let serialized = serde_json::to_string(&entry).unwrap();
 		assert!(serde_json::from_str::<Entry>(&serialized).is_err());

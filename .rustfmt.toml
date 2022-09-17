@@ -1,8 +1,0 @@
-hard_tabs = true
-max_width = 200
-chain_one_line_max = 200
-fn_call_width = 200
-closure_block_indent_threshold = 1
-match_block_trailing_comma = true
-fn_call_style = "Block"
-reorder_imports = true

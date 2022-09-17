@@ -1,9 +1,11 @@
-use super::fortresscrypto::{self, MasterKey, NetworkKeySuite, LoginKey};
-use super::serde;
+use super::{
+	fortresscrypto::{self, LoginKey, MasterKey, NetworkKeySuite},
+	serde,
+};
 use rand::Rng;
 
 
-new_type!{
+new_type! {
 	public LoginId(32);
 }
 
@@ -23,7 +25,7 @@ pub struct SyncParameters {
 	#[serde(skip_serializing, skip_deserializing)]
 	login_key: LoginKey,
 	#[serde(skip_serializing, skip_deserializing)]
-	login_id: LoginId,	// Hashed username sent to server for authentication
+	login_id: LoginId, // Hashed username sent to server for authentication
 }
 
 impl SyncParameters {
@@ -65,7 +67,8 @@ impl SyncParameters {
 
 impl<'de> serde::Deserialize<'de> for SyncParameters {
 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-		where D: serde::Deserializer<'de>
+	where
+		D: serde::Deserializer<'de>,
 	{
 		#[derive(Deserialize)]
 		struct DeserializableSyncParameters {

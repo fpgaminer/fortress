@@ -1,32 +1,36 @@
 extern crate byteorder;
-extern crate scrypt;
+extern crate chacha20;
+extern crate data_encoding;
+extern crate hmac;
 extern crate password_hash;
 extern crate rand;
-extern crate data_encoding;
+extern crate scrypt;
 extern crate serde;
-extern crate subtle;
 extern crate sha2;
-extern crate hmac;
-extern crate chacha20;
+extern crate subtle;
 
-#[macro_use] mod newtype_macros;
+#[macro_use]
+mod newtype_macros;
 
-use byteorder::{ReadBytesExt, WriteBytesExt, LittleEndian};
-use hmac::digest::CtOutput;
-use chacha20::ChaCha20Legacy;
-use chacha20::cipher::{KeyIvInit, StreamCipher};
-use hmac::{Hmac, Mac};
-use sha2::{Sha256, Digest};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
+use chacha20::{
+	cipher::{KeyIvInit, StreamCipher},
+	ChaCha20Legacy,
+};
+use hmac::{digest::CtOutput, Hmac, Mac};
 use rand::{OsRng, Rng};
-use std::io::{self, Cursor, Write, BufRead, Read};
-use std::str;
+use sha2::{Digest, Sha256};
+use std::{
+	io::{self, BufRead, Cursor, Read, Write},
+	str,
+};
 
 
-new_type!{
+new_type! {
 	secret Key(32);
 }
 
-new_type!{
+new_type! {
 	public MacTag(32);
 }
 
@@ -50,14 +54,20 @@ const MASTER_KEY_SCRYPT_P: u32 = 1;
 const MASTER_KEY_SCRYPT_P: u32 = 128;
 
 // Fixed key used to derive salt from username for master key's scrypt parameters
-const MASTER_KEY_USERNAME_SALT: Key = Key([0x51,0xc3,0xd0,0x0b,0xde,0x2b,0x32,0x58,0xca,0x17,0x92,0x72,0x15,0x3e,0xd0,0xfd,0x2e,0x47,0x56,0x04,0xda,0x14,0xba,0xc2,0xb7,0xa3,0xb9,0xbc,0xb0,0x50,0x4f,0xba]);
+const MASTER_KEY_USERNAME_SALT: Key = Key([
+	0x51, 0xc3, 0xd0, 0x0b, 0xde, 0x2b, 0x32, 0x58, 0xca, 0x17, 0x92, 0x72, 0x15, 0x3e, 0xd0, 0xfd, 0x2e, 0x47, 0x56, 0x04, 0xda, 0x14, 0xba, 0xc2, 0xb7, 0xa3,
+	0xb9, 0xbc, 0xb0, 0x50, 0x4f, 0xba,
+]);
 
 // Fixed key used to hash username for login (so the server doesn't know our real email)
 // In case of a server breach, this makes it annoying for attackers to crack user data, because they don't know the usernames and thus can't derive the master key's salt.
-const LOGIN_USERNAME_SALT: Key = Key([0x87,0x65,0x09,0x06,0xef,0xda,0x47,0x65,0x7a,0x1f,0x95,0x36,0x8f,0x7a,0xf7,0x11,0xc0,0xd1,0x0e,0x51,0x47,0x35,0x44,0x3c,0x0b,0xdc,0xa4,0x6e,0x11,0x81,0xaa,0xc4]);
+const LOGIN_USERNAME_SALT: Key = Key([
+	0x87, 0x65, 0x09, 0x06, 0xef, 0xda, 0x47, 0x65, 0x7a, 0x1f, 0x95, 0x36, 0x8f, 0x7a, 0xf7, 0x11, 0xc0, 0xd1, 0x0e, 0x51, 0x47, 0x35, 0x44, 0x3c, 0x0b, 0xdc,
+	0xa4, 0x6e, 0x11, 0x81, 0xaa, 0xc4,
+]);
 
 
-new_type!{
+new_type! {
 	secret MasterKey(32);
 }
 
@@ -76,7 +86,7 @@ impl MasterKey {
 }
 
 
-new_type!{
+new_type! {
 	secret LoginKey(32);
 }
 
@@ -176,10 +186,10 @@ pub fn decrypt_from_file<R: Read>(reader: &mut R, password: &[u8]) -> io::Result
 		return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "missing checksum"));
 	}
 
-	let payload = &payload_and_checksum[..payload_and_checksum.len()-32];
-	let checksum = &payload_and_checksum[payload_and_checksum.len()-32..];
+	let payload = &payload_and_checksum[..payload_and_checksum.len() - 32];
+	let checksum = &payload_and_checksum[payload_and_checksum.len() - 32..];
 
-	let calculated_hash = sha256(&filedata[..filedata.len()-32]).to_vec();
+	let calculated_hash = sha256(&filedata[..filedata.len() - 32]).to_vec();
 
 	if calculated_hash != checksum {
 		return Err(io::Error::new(io::ErrorKind::Other, "bad checksum"));
@@ -245,13 +255,15 @@ fn parse_header(data: &[u8]) -> io::Result<(EncryptionParameters, &[u8])> {
 
 	let pos = reader.position() as usize;
 
-	Ok((EncryptionParameters {
-		log_n: log_n,
-		r: r,
-		p: p,
-		salt: scrypt_salt,
-	},
-	&reader.into_inner()[pos..]))
+	Ok((
+		EncryptionParameters {
+			log_n: log_n,
+			r: r,
+			p: p,
+			salt: scrypt_salt,
+		},
+		&reader.into_inner()[pos..],
+	))
 }
 
 
@@ -330,8 +342,8 @@ fn deterministic_decryption(id: &[u8], payload: &[u8], mac_key: &Key, encryption
 		return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "missing mac tag or salt"));
 	}
 
-	let salt_and_ciphertext = &payload[..payload.len()-32];
-	let mac = CtOutput::new(hmac::digest::Output::<Hmac<Sha256>>::clone_from_slice(&payload[payload.len()-32..]));
+	let salt_and_ciphertext = &payload[..payload.len() - 32];
+	let mac = CtOutput::new(hmac::digest::Output::<Hmac<Sha256>>::clone_from_slice(&payload[payload.len() - 32..]));
 	let calculated_mac = {
 		let mut hmac = Hmac::<Sha256>::new_from_slice(&mac_key[..]).expect("unexpected");
 		hmac.update(id);
@@ -371,7 +383,7 @@ fn hmac(key: &Key, data: &[u8]) -> CtOutput<Hmac<Sha256>> {
 
 fn chacha20_process(key: &Key, data: &[u8]) -> Vec<u8> {
 	let mut result = data.to_vec();
-	let mut chacha = ChaCha20Legacy::new(chacha20::Key::from_slice(&key[..]), &[0,0,0,0,0,0,0,0].into());
+	let mut chacha = ChaCha20Legacy::new(chacha20::Key::from_slice(&key[..]), &[0, 0, 0, 0, 0, 0, 0, 0].into());
 	chacha.apply_keystream(&mut result);
 	result
 }
@@ -416,7 +428,9 @@ impl Default for EncryptionParameters {
 
 #[cfg(test)]
 mod tests {
-	use super::{Key, MasterKey, LoginKey, FileKeySuite, NetworkKeySuite, deterministic_encryption, deterministic_decryption, encrypt_to_file, decrypt_from_file, sha256};
+	use super::{
+		decrypt_from_file, deterministic_decryption, deterministic_encryption, encrypt_to_file, sha256, FileKeySuite, Key, LoginKey, MasterKey, NetworkKeySuite,
+	};
 	use rand::{OsRng, Rng};
 	use std::io::Cursor;
 
@@ -442,13 +456,13 @@ mod tests {
 
 		// Make sure it really is using a different key for different data
 		let mut data2 = data.clone();
-		data2[data.len()-1] ^= 1;
+		data2[data.len() - 1] ^= 1;
 		let (ciphertext3, mac3) = deterministic_encryption(&id, &data2, &salt_key, &mac_key, &encryption_key);
 
 		assert_ne!(ciphertext, ciphertext3);
 		assert_ne!(mac, mac3);
 		// If it were using the same key, these parts of the ciphertext would be the same (because a stream cipher is used)
-		assert_ne!(&ciphertext[32..ciphertext.len()-1], &ciphertext3[32..ciphertext3.len()-1]);
+		assert_ne!(&ciphertext[32..ciphertext.len() - 1], &ciphertext3[32..ciphertext3.len() - 1]);
 
 		// Make sure it is verifying the mac
 		ciphertext_and_mac[60] ^= 1;
@@ -541,7 +555,7 @@ mod tests {
 				buffer
 			};
 			let corrupted_mac = {
-				let mut data = (&encrypted_data[..encrypted_data.len()-32]).to_owned();
+				let mut data = (&encrypted_data[..encrypted_data.len() - 32]).to_owned();
 				// NOTE: We don't mutate the first couple of bytes where the header is.
 				// This is because it might mutate the scrypt parameters to absurd values, which
 				// can cause the library to spin forever during tests.
@@ -556,10 +570,19 @@ mod tests {
 
 			// Sometimes mutation_byte is 0, which means no corruption happened.  This is a good chance to test our test.
 			if mutation_byte == 0 {
-				assert_eq!(decrypt_from_file(&mut Cursor::new(corrupted_checksum), password).map(|(pt,_,_)| pt).map_err(|_| ()), Ok(payload.to_vec()));
-				assert_eq!(decrypt_from_file(&mut Cursor::new(corrupted_mac), password).map(|(pt,_,_)| pt).map_err(|_| ()), Ok(payload.to_vec()));
-			}
-			else {
+				assert_eq!(
+					decrypt_from_file(&mut Cursor::new(corrupted_checksum), password)
+						.map(|(pt, _, _)| pt)
+						.map_err(|_| ()),
+					Ok(payload.to_vec())
+				);
+				assert_eq!(
+					decrypt_from_file(&mut Cursor::new(corrupted_mac), password)
+						.map(|(pt, _, _)| pt)
+						.map_err(|_| ()),
+					Ok(payload.to_vec())
+				);
+			} else {
 				assert!(decrypt_from_file(&mut Cursor::new(corrupted_checksum), password).is_err());
 				assert!(decrypt_from_file(&mut Cursor::new(corrupted_mac), password).is_err());
 			}

@@ -1,11 +1,9 @@
 // A simplified in-memory Fortress server used for sync tests
-use tiny_http::{Server, Response, Method};
-use serde_json;
-use std::thread;
-use std::collections::HashMap;
-use libfortress::ID;
-use libfortress::fortresscrypto::MacTag;
 use data_encoding::HEXLOWER_PERMISSIVE;
+use libfortress::{fortresscrypto::MacTag, ID};
+use serde_json;
+use std::{collections::HashMap, thread};
+use tiny_http::{Method, Response, Server};
 
 
 // Starts a server and returns the address it is listening on
@@ -16,10 +14,10 @@ pub fn server() -> String {
 
 	let api = |url: &str, json: JsonRequest, db: &mut HashMap<ID, (Vec<u8>, MacTag)>| match url {
 		"/update_object" => {
-			db.insert(json.object_id.unwrap(), (
-				HEXLOWER_PERMISSIVE.decode(json.data.unwrap().as_bytes()).unwrap(),
-				json.data_mac.unwrap(),
-			));
+			db.insert(
+				json.object_id.unwrap(),
+				(HEXLOWER_PERMISSIVE.decode(json.data.unwrap().as_bytes()).unwrap(), json.data_mac.unwrap()),
+			);
 
 			json!({ "error": null })
 		},
@@ -48,21 +46,19 @@ pub fn server() -> String {
 				"unknown_ids": unknown_ids,
 			})
 		},
-		"/get_object" => {
-			match db.get(&json.object_id.unwrap()) {
-				Some(object) => {
-					json!({
-						"error": null,
-						"data": HEXLOWER_PERMISSIVE.encode(&object.0),
-						"mac": object.1,
-					})
-				},
-				None => {
-					json!({
-						"error": "Unknown Object",
-					})
-				}
-			}
+		"/get_object" => match db.get(&json.object_id.unwrap()) {
+			Some(object) => {
+				json!({
+					"error": null,
+					"data": HEXLOWER_PERMISSIVE.encode(&object.0),
+					"mac": object.1,
+				})
+			},
+			None => {
+				json!({
+					"error": "Unknown Object",
+				})
+			},
 		},
 		_ => panic!("404"),
 	};
@@ -84,8 +80,10 @@ pub fn server() -> String {
 // Handles all possible requests
 #[derive(Deserialize)]
 struct JsonRequest {
-	#[serde(rename="user_id")] _user_id: ID,     // Must be provided for API calls, but is not checked for tests.
-	#[serde(rename="user_key")] _user_key: ID,   // Must be provided for API calls, but is not checked for tests.
+	#[serde(rename = "user_id")]
+	_user_id: ID, // Must be provided for API calls, but is not checked for tests.
+	#[serde(rename = "user_key")]
+	_user_key: ID, // Must be provided for API calls, but is not checked for tests.
 	object_id: Option<ID>,
 	data: Option<String>,
 	data_mac: Option<MacTag>,

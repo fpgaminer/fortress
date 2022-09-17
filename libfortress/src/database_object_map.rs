@@ -1,10 +1,10 @@
-use std;
-use std::collections::{HashMap, BTreeMap};
-use std::borrow::Borrow;
-use std::hash::Hash;
-use super::serde;
-use super::database_object::DatabaseObject;
-use super::ID;
+use super::{database_object::DatabaseObject, serde, ID};
+use std::{
+	self,
+	borrow::Borrow,
+	collections::{BTreeMap, HashMap},
+	hash::Hash,
+};
 
 
 // We wrap HashMap to enforce some invariants.
@@ -29,21 +29,21 @@ pub struct DatabaseObjectMap {
 
 impl DatabaseObjectMap {
 	pub fn new() -> DatabaseObjectMap {
-		DatabaseObjectMap {
-			inner: HashMap::new(),
-		}
+		DatabaseObjectMap { inner: HashMap::new() }
 	}
 
 	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&DatabaseObject>
-		where Q: Hash + Eq,
-			  ID: Borrow<Q>
+	where
+		Q: Hash + Eq,
+		ID: Borrow<Q>,
 	{
 		self.inner.get(key)
 	}
 
 	pub fn get_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<&mut DatabaseObject>
-		where Q: Hash + Eq,
-		      ID: Borrow<Q>
+	where
+		Q: Hash + Eq,
+		ID: Borrow<Q>,
 	{
 		self.inner.get_mut(key)
 	}
@@ -56,11 +56,15 @@ impl DatabaseObjectMap {
 	// NOTE: Does not allow you to overwrite an existing object if that operation would be destructive (e.g. older version, conflicting history, etc).
 	pub fn update(&mut self, object: DatabaseObject) {
 		match (self.inner.get(object.get_id()), &object) {
-			(Some(&DatabaseObject::Entry(ref existing)), &DatabaseObject::Entry(ref new_object)) => if !existing.safe_to_replace_with(new_object) {
-				panic!("Attempted to overwrite an existing DatabaseObject with an older version.");
+			(Some(&DatabaseObject::Entry(ref existing)), &DatabaseObject::Entry(ref new_object)) => {
+				if !existing.safe_to_replace_with(new_object) {
+					panic!("Attempted to overwrite an existing DatabaseObject with an older version.");
+				}
 			},
-			(Some(&DatabaseObject::Directory(ref existing)), &DatabaseObject::Directory(ref new_object)) => if !existing.safe_to_replace_with(new_object) {
-				panic!("Attempted to overwrite an existing DatabaseObject with an older version.");
+			(Some(&DatabaseObject::Directory(ref existing)), &DatabaseObject::Directory(ref new_object)) => {
+				if !existing.safe_to_replace_with(new_object) {
+					panic!("Attempted to overwrite an existing DatabaseObject with an older version.");
+				}
 			},
 			(None, _) => {},
 			_ => {
@@ -74,7 +78,8 @@ impl DatabaseObjectMap {
 
 impl serde::Serialize for DatabaseObjectMap {
 	fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-		where S: serde::Serializer
+	where
+		S: serde::Serializer,
 	{
 		// Deterministic serialization of the hashmap by ordering keys
 		let ordered: BTreeMap<_, _> = self.inner.iter().collect();
@@ -84,7 +89,8 @@ impl serde::Serialize for DatabaseObjectMap {
 
 impl<'de> serde::Deserialize<'de> for DatabaseObjectMap {
 	fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-		where D: serde::Deserializer<'de>
+	where
+		D: serde::Deserializer<'de>,
 	{
 		Ok(DatabaseObjectMap {
 			inner: HashMap::deserialize(deserializer)?,
@@ -104,8 +110,10 @@ impl<'a> IntoIterator for &'a DatabaseObjectMap {
 
 #[cfg(test)]
 mod tests {
-	use super::DatabaseObjectMap;
-	use super::super::{DatabaseObject, Entry, EntryHistory};
+	use super::{
+		super::{DatabaseObject, Entry, EntryHistory},
+		DatabaseObjectMap,
+	};
 
 	#[test]
 	#[should_panic]
@@ -114,10 +122,10 @@ mod tests {
 
 		let mut entry = Entry::new();
 		let old_entry = entry.clone();
-		entry.edit(EntryHistory::new([
-			("title".to_string(), "Panic at the HashMap".to_string()),
-			].iter().cloned().collect()));
-		
+		entry.edit(EntryHistory::new(
+			[("title".to_string(), "Panic at the HashMap".to_string())].iter().cloned().collect(),
+		));
+
 		object_map.update(DatabaseObject::Entry(entry.clone()));
 
 		// TODO: It would be nice to not use [should_panic] on this whole test function

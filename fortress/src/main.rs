@@ -1,6 +1,6 @@
-extern crate libfortress;
-extern crate gtk;
 extern crate data_encoding;
+extern crate gtk;
+extern crate libfortress;
 #[macro_use]
 extern crate clap;
 extern crate directories;
@@ -10,23 +10,23 @@ extern crate serde_derive;
 extern crate serde_json;
 
 use data_encoding::HEXLOWER_PERMISSIVE;
-use gtk::{CellRendererText, ListStore, TreeView, TreeViewColumn};
-use gtk::prelude::*;
+use gtk::{prelude::*, CellRendererText, ListStore, TreeView, TreeViewColumn};
 use libfortress::{Database, ID};
-use std::cell::RefCell;
-use std::fs::{self, File};
-use std::io::{self, Write, Read, BufReader};
-use std::path::{Path, PathBuf};
-use std::rc::Rc;
-use std::sync::mpsc::{channel, Sender, Receiver};
+use std::{
+	cell::RefCell,
+	fs::{self, File},
+	io::{self, BufReader, Read, Write},
+	path::{Path, PathBuf},
+	rc::Rc,
+	sync::mpsc::{channel, Receiver, Sender},
+};
 
 
 macro_rules! connect {
-	($master:ident, $widget:expr, $event:ident, $callback:ident) => (
-		{
-			let tx = $master.tx.clone();
-			let rx = $master.rx.clone();
-			let app = $master.app.clone();
+	($master:ident, $widget:expr, $event:ident, $callback:ident) => {{
+		let tx = $master.tx.clone();
+		let rx = $master.rx.clone();
+		let app = $master.app.clone();
 
 			$widget.$event(move |_| {
 				tx.send(Self::$callback).unwrap();

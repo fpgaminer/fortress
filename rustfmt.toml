@@ -1,0 +1,5 @@
+hard_tabs=true
+max_width=160
+imports_granularity="Crate"
+blank_lines_upper_bound=2
+match_block_trailing_comma=true
