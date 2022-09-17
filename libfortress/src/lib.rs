@@ -28,11 +28,11 @@ extern crate serde_derive;
 extern crate serde;
 extern crate serde_json;
 extern crate data_encoding;
-extern crate crypto;
 extern crate byteorder;
 extern crate tempfile;
 pub extern crate fortresscrypto;
 extern crate reqwest;
+extern crate subtle;
 
 #[macro_use] mod newtype_macros;
 mod database_object;
@@ -226,7 +226,7 @@ impl Database {
 		if self.do_not_set_testing == false {
 			url.set_scheme("https").unwrap();	// Force SSL
 		}
-		let client = reqwest::Client::new();
+		let client = reqwest::blocking::Client::new();
 
 		// Diff existing objects
 		let (updates, unknown_ids) = self.sync_api_diff_objects(&client, &url).unwrap();
@@ -286,7 +286,7 @@ impl Database {
 	}
 
 	// Upload object to fortress server
-	fn sync_api_update_object(&self, client: &reqwest::Client, url: &Url, object: &DatabaseObject) -> Result<(), ApiError> {
+	fn sync_api_update_object(&self, client: &reqwest::blocking::Client, url: &Url, object: &DatabaseObject) -> Result<(), ApiError> {
 		#[derive(Serialize, Debug)]
 		struct UpdateObjectRequest<'a,'b,'c,'d,'e> {
 			user_id: &'a LoginId,
@@ -316,7 +316,7 @@ impl Database {
 
 	// Diffs all existing objects in the database against the fortress server
 	// Returns updates and IDs unknown to the server.
-	fn sync_api_diff_objects(&self, client: &reqwest::Client, url: &Url) -> Result<(Vec<DiffObjectResponseUpdate>, Vec<ID>), ApiError> {
+	fn sync_api_diff_objects(&self, client: &reqwest::blocking::Client, url: &Url) -> Result<(Vec<DiffObjectResponseUpdate>, Vec<ID>), ApiError> {
 		#[derive(Serialize)]
 		struct DiffObjectRequest<'a,'b,'c> {
 			user_id: &'a LoginId,
@@ -361,7 +361,7 @@ impl Database {
 
 	// Fetch an object from the server.
 	// If the object doesn't exist on the server or could not be decrypted then None is returned.
-	fn sync_api_get_object(&self, client: &reqwest::Client, url: &Url, id: &ID) -> Result<Option<DatabaseObject>, ApiError> {
+	fn sync_api_get_object(&self, client: &reqwest::blocking::Client, url: &Url, id: &ID) -> Result<Option<DatabaseObject>, ApiError> {
 		#[derive(Serialize)]
 		struct GetObjectRequest<'a,'b,'c> {
 			user_id: &'a LoginId,
@@ -467,7 +467,7 @@ impl Database {
 		queued_updates
 	}
 
-	fn sync_merge_directories(&self, client: &reqwest::Client, url: &Url, updates: &[(&Directory, Directory)]) -> Vec<(DatabaseObject, bool)> {
+	fn sync_merge_directories(&self, client: &reqwest::blocking::Client, url: &Url, updates: &[(&Directory, Directory)]) -> Vec<(DatabaseObject, bool)> {
 		let mut queued_updates = Vec::new();
 
 		// TODO: Sync doesn't support nested directories yet, so we will only sync the root directory.
@@ -484,7 +484,7 @@ impl Database {
 
 	// Merge a directory update and also download new objects resulting from the merge
 	// If we fail to download any of the new objects this function will return an empty vector
-	fn sync_merge_directory_and_recurse(&self, client: &reqwest::Client, url: &Url, local_directory: &Directory, server_directory: &Directory) -> Vec<(DatabaseObject, bool)> {
+	fn sync_merge_directory_and_recurse(&self, client: &reqwest::blocking::Client, url: &Url, local_directory: &Directory, server_directory: &Directory) -> Vec<(DatabaseObject, bool)> {
 		let mut queued_updates = Vec::new();
 
 		let (new_directory, new_ids, should_upload) = sync_merge_directory(local_directory, server_directory, &self.objects);
@@ -547,7 +547,7 @@ impl From<reqwest::Error> for ApiError {
 // TODO: The server either returns { error: String } or the intended response (R).
 // The way we handle that is with a generic, flattened enum ApiErrorResponse.
 // This is a bit awkward; is there a better solution?
-fn api_request<U, T, R>(client: &reqwest::Client, url: U, request: &T) -> Result<R, ApiError>
+fn api_request<U, T, R>(client: &reqwest::blocking::Client, url: U, request: &T) -> Result<R, ApiError>
 	where U: IntoUrl,
 	      T: serde::ser::Serialize + ?Sized,
 	      R: serde::de::DeserializeOwned
@@ -668,6 +668,10 @@ mod tests {
 	use rand::{OsRng, Rng};
 	use std::collections::HashMap;
 	use tempfile::tempdir;
+
+	pub(crate) fn quick_sleep() {
+		std::thread::sleep(std::time::Duration::from_nanos(1));
+	}
 
 	#[test]
 	fn encrypt_then_decrypt() {
@@ -1018,10 +1022,15 @@ mod tests {
 		let id3: ID = rng.gen();
 
 		directory.add(id1.clone());
+		quick_sleep();
 		directory.add(id2.clone());
+		quick_sleep();
 		directory.add(id3.clone());
+		quick_sleep();
 		directory.remove(id2.clone());
+		quick_sleep();
 		directory.remove(id3.clone());
+		quick_sleep();
 		directory.add(id2.clone());
 
 		let object = DatabaseObject::Directory(directory);

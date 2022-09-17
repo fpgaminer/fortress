@@ -193,6 +193,7 @@ mod tests {
 	use rand::{OsRng, Rng};
 	use serde_json;
 	use super::{Directory, DirectoryHistory, DirectoryHistoryAction};
+	use crate::tests::quick_sleep;
 
 	#[test]
 	fn history_must_be_ordered() {
@@ -253,6 +254,7 @@ mod tests {
 		let mut directory = Directory::new();
 		let id = rng.gen();
 		directory.add(id);
+		quick_sleep();
 		directory.add(id);
 	}
 
@@ -302,9 +304,11 @@ mod tests {
 		{
 			let mut directory1 = Directory::new();
 			directory1.add(rng.gen());
+			quick_sleep();
 			let mut directory2 = directory1.clone();
 			let id = rng.gen();
 			directory1.add(id);
+			quick_sleep();
 			directory2.add(id);
 			assert!(directory1.merge(&directory2).is_none());
 			assert!(!directory1.safe_to_replace_with(&directory2));
@@ -315,6 +319,7 @@ mod tests {
 			let mut directory1 = Directory::new();
 			let mut directory2 = directory1.clone();
 			directory1.add(rng.gen());
+			quick_sleep();
 			directory2.add(rng.gen());
 			assert!(!directory1.safe_to_replace_with(&directory2));
 		}
@@ -323,12 +328,17 @@ mod tests {
 		{
 			let mut directory1 = Directory::new();
 			directory1.add(rng.gen());
+			quick_sleep();
 			let id = rng.gen();
 			directory1.add(id);
+			quick_sleep();
 			directory1.add(rng.gen());
+			quick_sleep();
 			let mut directory2 = directory1.clone();
 			directory2.add(rng.gen());
+			quick_sleep();
 			directory2.remove(id);
+			quick_sleep();
 			directory1.add(rng.gen());
 
 			assert_eq!(directory1.safe_to_replace_with(&directory2), false);
