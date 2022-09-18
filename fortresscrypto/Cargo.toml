@@ -5,7 +5,7 @@ version = "1.0.1"
 license = "MIT/Apache-2.0"
 repository = "https://github.com/fpgaminer/fortress"
 description = "Cryptography helper library for fortress"
-edition = "2018"
+edition = "2021"
 
 [dependencies]
 byteorder = "1.0"
