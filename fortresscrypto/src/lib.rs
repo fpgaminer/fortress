@@ -1,60 +1,45 @@
-extern crate byteorder;
-extern crate chacha20;
-extern crate data_encoding;
-extern crate hmac;
-extern crate password_hash;
-extern crate rand;
-extern crate scrypt;
-extern crate serde;
-extern crate sha2;
-extern crate subtle;
-
 #[macro_use]
 mod newtype_macros;
+mod error;
+mod siv;
 
-use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use chacha20::{
-	cipher::{KeyIvInit, StreamCipher},
-	ChaCha20Legacy,
-};
+use byteorder::{LittleEndian, ReadBytesExt};
+use error::CryptoError;
 use hmac::{digest::CtOutput, Hmac, Mac};
 use rand::{OsRng, Rng};
 use sha2::{Digest, Sha256};
+use siv::{SivEncryptionKeys, SIV};
 use std::{
 	io::{self, BufRead, Cursor, Read, Write},
 	str,
 };
 
 
-new_type! {
-	secret Key(32);
-}
-
-new_type! {
-	public MacTag(32);
-}
+new_type!(secret Key(32););
+new_type!(public MacTag(32););
+new_type!(secret LoginKey(32););
 
 
-// The MasterKey is used to derive the keys used for cloud storage.  Because of this, we want it to be _extremely_ hard to crack.
+// For cloud storage, we want the user's password to be _extremely_ hard to crack.
 // Since we don't care how long it initially takes to generate (e.g. the user won't notice it taking 5 minutes to initially sync to the cloud), we can use
 // really big scrypt parameters.
 // With the parameters set this way it should cost an attacker ~$50 million to crack a user's weak password using rented compute power (assuming a random, 8 character all lowercase password consisting of only a-z).
 // It should take the average computer ~5 minutes to derive (less if more cores are used).
 // NOTE: In debug mode, we use smaller parameters since debug builds are only for testing and run very slow.
 #[cfg(debug_assertions)]
-const MASTER_KEY_SCRYPT_LOG_N: u8 = 14;
+const NETWORK_SCRYPT_LOG_N: u8 = 14;
 #[cfg(not(debug_assertions))]
-const MASTER_KEY_SCRYPT_LOG_N: u8 = 20;
+const NETWORK_SCRYPT_LOG_N: u8 = 20;
 
-const MASTER_KEY_SCRYPT_R: u32 = 8;
+const NETWORK_SCRYPT_R: u32 = 8;
 
 #[cfg(debug_assertions)]
-const MASTER_KEY_SCRYPT_P: u32 = 1;
+const NETWORK_SCRYPT_P: u32 = 1;
 #[cfg(not(debug_assertions))]
-const MASTER_KEY_SCRYPT_P: u32 = 128;
+const NETWORK_SCRYPT_P: u32 = 128;
 
-// Fixed key used to derive salt from username for master key's scrypt parameters
-const MASTER_KEY_USERNAME_SALT: Key = Key([
+// Fixed key used to derive salt from username
+const NETWORK_USERNAME_SALT: Key = Key([
 	0x51, 0xc3, 0xd0, 0x0b, 0xde, 0x2b, 0x32, 0x58, 0xca, 0x17, 0x92, 0x72, 0x15, 0x3e, 0xd0, 0xfd, 0x2e, 0x47, 0x56, 0x04, 0xda, 0x14, 0xba, 0xc2, 0xb7, 0xa3,
 	0xb9, 0xbc, 0xb0, 0x50, 0x4f, 0xba,
 ]);
@@ -67,136 +52,114 @@ const LOGIN_USERNAME_SALT: Key = Key([
 ]);
 
 
-new_type! {
-	secret MasterKey(32);
-}
-
-impl MasterKey {
-	// Derive from username and password using a very aggressive KDF.
-	// This function call will take a long time to finish (5 minutes or more).
-	pub fn derive(username: &[u8], password: &[u8]) -> MasterKey {
-		// Use the username as salt for the scrypt function, so attackers can't build a rainbow table to broadly attack users.
-		// Hide username behind hmac so salt is unique to this application.
-		let salt = hmac(&MASTER_KEY_USERNAME_SALT, username).into_bytes();
-		let mut master_key = [0u8; 32];
-		let scrypt_params = scrypt::Params::new(MASTER_KEY_SCRYPT_LOG_N, MASTER_KEY_SCRYPT_R, MASTER_KEY_SCRYPT_P).expect("scrypt parameters should be valid");
-		scrypt::scrypt(password, &salt, &scrypt_params, &mut master_key).expect("unexpected");
-		MasterKey(master_key)
-	}
-}
-
-
-new_type! {
-	secret LoginKey(32);
-}
-
-impl LoginKey {
-	pub fn derive(master_key: &MasterKey) -> LoginKey {
-		LoginKey(derive_key(&Key(master_key.0), DerivativeKeyId::LoginKey).0)
-	}
-}
-
-
 pub fn hash_username_for_login(username: &[u8]) -> Vec<u8> {
 	hmac(&LOGIN_USERNAME_SALT, username).into_bytes().to_vec()
 }
 
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+pub struct EncryptedObject(pub Vec<u8>);
+
+
+#[derive(Eq, PartialEq, Debug)]
 pub struct NetworkKeySuite {
-	salt_key: Key,
-	mac_key: Key,
-	encryption_key: Key,
+	encryption_keys: SivEncryptionKeys,
+	login_key: LoginKey,
 }
 
 impl NetworkKeySuite {
-	pub fn derive(master_key: &MasterKey) -> NetworkKeySuite {
-		let master_key = Key(master_key.0);
+	/// Derive from username and password using a very aggressive KDF.
+	/// This function call will take a long time to finish (5 minutes or more).
+	pub fn derive(username: &[u8], password: &[u8]) -> NetworkKeySuite {
+		// Hide username behind hmac so salt is unique to this application.
+		let salt = hmac(&NETWORK_USERNAME_SALT, username).into_bytes();
+		let mut raw_keys = [0u8; 256 + 32];
+		let scrypt_params = scrypt::Params::new(NETWORK_SCRYPT_LOG_N, NETWORK_SCRYPT_R, NETWORK_SCRYPT_P).expect("scrypt parameters should be valid");
+		scrypt::scrypt(password, &salt, &scrypt_params, &mut raw_keys).expect("internal error");
+
+		let (siv_keys, raw_keys) = raw_keys.split_at(256);
+		let (login_key, _) = raw_keys.split_at(32);
 
 		NetworkKeySuite {
-			salt_key: derive_key(&master_key, DerivativeKeyId::NetworkSaltKey),
-			mac_key: derive_key(&master_key, DerivativeKeyId::NetworkMacKey),
-			encryption_key: derive_key(&master_key, DerivativeKeyId::NetworkEncryptionKey),
+			encryption_keys: SivEncryptionKeys::from_slice(siv_keys).expect("internal error"),
+			login_key: LoginKey::from_slice(login_key).expect("internal error"),
 		}
 	}
 
-	// Deterministically encrypt data, returning (ciphertext, mac)
-	// ID is included in the MAC calculation, but not in the ciphertext; useful for ensuring the server can't swap object data around.
-	pub fn encrypt_object(&self, id: &[u8], data: &[u8]) -> (Vec<u8>, MacTag) {
-		deterministic_encryption(id, data, &self.salt_key, &self.mac_key, &self.encryption_key)
+	pub fn encrypt_object(&self, id: &[u8], data: &[u8]) -> EncryptedObject {
+		let (siv, ciphertext) = self.encryption_keys.encrypt(id, data);
+		EncryptedObject([siv.as_ref(), ciphertext.as_slice()].concat())
 	}
 
 	// Deterministically decrypt payload, after validating mac.  Returns plaintext.
-	pub fn decrypt_object(&self, id: &[u8], payload: &[u8]) -> io::Result<Vec<u8>> {
-		deterministic_decryption(id, payload, &self.mac_key, &self.encryption_key)
+	pub fn decrypt_object(&self, id: &[u8], encrypted_object: &EncryptedObject) -> Result<Vec<u8>, CryptoError> {
+		if encrypted_object.0.len() < 32 {
+			return Err(CryptoError::DecryptionError);
+		}
+
+		let (siv, ciphertext) = encrypted_object.0.split_at(32);
+		let siv = SIV::from_slice(siv).expect("internal error");
+		self.encryption_keys.decrypt(id, &siv, ciphertext).ok_or(CryptoError::DecryptionError)
 	}
 }
 
 
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Eq, PartialEq, Debug)]
 pub struct FileKeySuite {
-	salt_key: Key,
-	mac_key: Key,
-	encryption_key: Key,
+	encryption_keys: SivEncryptionKeys,
 }
 
 impl FileKeySuite {
-	pub fn derive(password: &[u8], params: &EncryptionParameters) -> FileKeySuite {
-		let mut file_key = [0u8; 32];
-		// TODO: The scrypt crate panics if these parameters aren't valid.  Since
-		// we're reading these from a file it'd be nice if we could instead return an error.
-		// Though this won't happen during normal usage (file checksum makes it pathological to
-		// manually edit the scrypt parameters to something invalid).
-		let scrypt_params = scrypt::Params::new(params.log_n, params.r, params.p).unwrap();
-		scrypt::scrypt(password, &params.salt, &scrypt_params, &mut file_key).expect("unexpected");
-		let file_key = Key(file_key);
+	pub fn derive(password: &[u8], params: &EncryptionParameters) -> Result<FileKeySuite, CryptoError> {
+		let mut raw_keys = [0u8; 256];
 
-		FileKeySuite {
-			salt_key: derive_key(&file_key, DerivativeKeyId::FileSaltKey),
-			mac_key: derive_key(&file_key, DerivativeKeyId::FileMacKey),
-			encryption_key: derive_key(&file_key, DerivativeKeyId::FileEncryptionKey),
-		}
+		let scrypt_params = scrypt::Params::new(params.log_n, params.r, params.p).map_err(|_| CryptoError::BadScryptParameters)?;
+		scrypt::scrypt(password, &params.salt, &scrypt_params, &mut raw_keys).expect("internal error");
+
+		Ok(FileKeySuite {
+			encryption_keys: SivEncryptionKeys::from_slice(&raw_keys).expect("internal error"),
+		})
 	}
 
-	// Deterministically encrypt data, returning ciphertext+mac
 	fn encrypt_object(&self, data: &[u8]) -> Vec<u8> {
-		let (mut ciphertext, mac) = deterministic_encryption(&[], data, &self.salt_key, &self.mac_key, &self.encryption_key);
-		ciphertext.extend_from_slice(&mac[..]);
-		ciphertext
+		let (siv, ciphertext) = self.encryption_keys.encrypt(&[], data);
+		[siv.as_ref(), ciphertext.as_slice()].concat()
 	}
 
-	// Deterministically decrypt ciphertext, after validating mac.  Returns plaintext.
-	fn decrypt_object(&self, data: &[u8]) -> io::Result<Vec<u8>> {
-		deterministic_decryption(&[], data, &self.mac_key, &self.encryption_key)
+	fn decrypt_object(&self, data: &[u8]) -> Result<Vec<u8>, CryptoError> {
+		if data.len() < 32 {
+			return Err(CryptoError::DecryptionError);
+		}
+
+		let (siv, ciphertext) = data.split_at(32);
+		let siv = SIV::from_slice(siv).expect("internal error");
+		self.encryption_keys.decrypt(&[], &siv, ciphertext).ok_or(CryptoError::DecryptionError)
 	}
 }
 
 
-// Decrypts a database stored on disk.  Returns the plaintext, EncryptionParameters that were used, and the FileKeySuite that was used.
-pub fn decrypt_from_file<R: Read>(reader: &mut R, password: &[u8]) -> io::Result<(Vec<u8>, EncryptionParameters, FileKeySuite)> {
+/// Decrypts a database stored on disk.  Returns the plaintext, EncryptionParameters that were used, and the FileKeySuite that was used.
+pub fn decrypt_from_file<R: Read>(reader: &mut R, password: &[u8]) -> Result<(Vec<u8>, EncryptionParameters, FileKeySuite), CryptoError> {
 	// Read file
 	let mut filedata = Vec::new();
 	reader.read_to_end(&mut filedata)?;
 
-	// Parse header
-	let (params, payload_and_checksum) = parse_header(&filedata)?;
-
 	// Check checksum
-	if payload_and_checksum.len() < 32 {
-		return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "missing checksum"));
+	if filedata.len() < 32 {
+		return Err(CryptoError::TruncatedData);
 	}
 
-	let payload = &payload_and_checksum[..payload_and_checksum.len() - 32];
-	let checksum = &payload_and_checksum[payload_and_checksum.len() - 32..];
+	let (filedata, checksum) = filedata.split_at(filedata.len() - 32);
+	let calculated_checksum = sha256(filedata);
 
-	let calculated_hash = sha256(&filedata[..filedata.len() - 32]).to_vec();
-
-	if calculated_hash != checksum {
-		return Err(io::Error::new(io::ErrorKind::Other, "bad checksum"));
+	if calculated_checksum != checksum {
+		return Err(CryptoError::BadChecksum);
 	}
+
+	// Parse header
+	let (params, payload) = parse_header(&filedata)?;
 
 	// Derive keys
-	let file_key_suite = FileKeySuite::derive(password, &params);
+	let file_key_suite = FileKeySuite::derive(password, &params)?;
 
 	// Decrypt
 	let plaintext = file_key_suite.decrypt_object(payload)?;
@@ -205,11 +168,11 @@ pub fn decrypt_from_file<R: Read>(reader: &mut R, password: &[u8]) -> io::Result
 }
 
 
-// Encrypts a database to disk.  Resulting file will contain a header, ciphertext, mac, and checksum.
+/// Encrypts a database to disk.  Resulting file will contain a header, ciphertext, mac, and checksum.
 pub fn encrypt_to_file<W: Write>(writer: &mut W, data: &[u8], params: &EncryptionParameters, key_suite: &FileKeySuite) -> io::Result<()> {
 	let ciphertext = key_suite.encrypt_object(data);
 	let header = build_header(params);
-	let hash = {
+	let checksum = {
 		let mut hash = [0u8; 32];
 		let mut hasher = Sha256::new();
 		hasher.update(&header);
@@ -220,31 +183,31 @@ pub fn encrypt_to_file<W: Write>(writer: &mut W, data: &[u8], params: &Encryptio
 
 	writer.write_all(&header)?;
 	writer.write_all(&ciphertext)?;
-	writer.write_all(&hash)
+	writer.write_all(&checksum)
 }
 
 
 fn build_header(params: &EncryptionParameters) -> Vec<u8> {
 	let mut result = Vec::new();
 
-	result.write_all(b"fortress2\0").unwrap();
-	result.write_u8(params.log_n).unwrap();
-	result.write_u32::<LittleEndian>(params.r).unwrap();
-	result.write_u32::<LittleEndian>(params.p).unwrap();
-	result.write_all(&params.salt).unwrap();
+	result.extend_from_slice(b"fortress2\0");
+	result.extend_from_slice(&params.log_n.to_le_bytes());
+	result.extend_from_slice(&params.r.to_le_bytes());
+	result.extend_from_slice(&params.p.to_le_bytes());
+	result.extend_from_slice(&params.salt);
 	result
 }
 
 
-fn parse_header(data: &[u8]) -> io::Result<(EncryptionParameters, &[u8])> {
+fn parse_header(data: &[u8]) -> Result<(EncryptionParameters, &[u8]), CryptoError> {
 	let mut reader = Cursor::new(data);
 
 	let mut header_string = Vec::new();
 	reader.read_until(0, &mut header_string)?;
 
 	// Only v2 is supported
-	if str::from_utf8(&header_string).map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "unsupported format"))? != "fortress2\0" {
-		return Err(io::Error::new(io::ErrorKind::InvalidData, "unsupported format"));
+	if str::from_utf8(&header_string).map_err(|_| CryptoError::UnsupportedVersion)? != "fortress2\0" {
+		return Err(CryptoError::UnsupportedVersion);
 	}
 
 	let log_n = reader.read_u8()?;
@@ -257,111 +220,13 @@ fn parse_header(data: &[u8]) -> io::Result<(EncryptionParameters, &[u8])> {
 
 	Ok((
 		EncryptionParameters {
-			log_n: log_n,
-			r: r,
-			p: p,
+			log_n,
+			r,
+			p,
 			salt: scrypt_salt,
 		},
 		&reader.into_inner()[pos..],
 	))
-}
-
-
-enum DerivativeKeyId {
-	LoginKey,
-
-	NetworkSaltKey,
-	NetworkMacKey,
-	NetworkEncryptionKey,
-
-	FileSaltKey,
-	FileMacKey,
-	FileEncryptionKey,
-}
-
-// We use an enum and the salt method to help prevent us from accidentally using the same
-// id string for two different keys.
-impl DerivativeKeyId {
-	fn salt(&self) -> &[u8] {
-		match *self {
-			DerivativeKeyId::LoginKey => b"login-key",
-
-			DerivativeKeyId::NetworkSaltKey => b"network-salt-key",
-			DerivativeKeyId::NetworkMacKey => b"network-mac-key",
-			DerivativeKeyId::NetworkEncryptionKey => b"network-encryption-key",
-
-			DerivativeKeyId::FileSaltKey => b"file-salt-key",
-			DerivativeKeyId::FileMacKey => b"file-mac-key",
-			DerivativeKeyId::FileEncryptionKey => b"file-encryption-key",
-		}
-	}
-}
-
-fn derive_key(parent_key: &Key, child_id: DerivativeKeyId) -> Key {
-	Key::from_slice(&hmac(parent_key, child_id.salt()).into_bytes()).unwrap()
-}
-
-
-fn derive_deterministic_encryption_key(encryption_key: &Key, salt: &[u8]) -> Key {
-	let salted_encryption_key = hmac(encryption_key, &salt[..32]).into_bytes();
-	Key::from_slice(&salted_encryption_key).unwrap()
-}
-
-
-// Perform deterministic encryption.
-// This is done by deriving a salt from the plaintext using HMAC, and using the salt to derive a unique encryption key for the data.
-// The use of a unique encryption key allows us to use stream ciphers like ChaCha20.
-// Finally, we append a MAC.
-// The result is salt+ciphertext+mac.
-// During decryption we validate the MAC first, which prevents attackers from manipulating our algorithm.
-// id is included in the MAC calculation, but it is not included as part of ciphertext.
-fn deterministic_encryption(id: &[u8], plaintext: &[u8], salt_key: &Key, mac_key: &Key, encryption_key: &Key) -> (Vec<u8>, MacTag) {
-	let salt = hmac(salt_key, plaintext).into_bytes();
-	let salted_encryption_key = derive_deterministic_encryption_key(encryption_key, &salt);
-	let mut ciphertext = chacha20_process(&salted_encryption_key, plaintext);
-
-	let mut result = Vec::new();
-	result.extend_from_slice(&salt);
-	result.append(&mut ciphertext);
-
-	let mac = {
-		let mut hmac = Hmac::<Sha256>::new_from_slice(&mac_key[..]).expect("unexpected");
-		hmac.update(id);
-		hmac.update(&result);
-		MacTag::from_slice(&hmac.finalize().into_bytes()).unwrap()
-	};
-
-	(result, mac)
-}
-
-
-// Refer to deterministic_encryption for the scheme used here.
-// Returns the plaintext or an error (MAC failure).
-fn deterministic_decryption(id: &[u8], payload: &[u8], mac_key: &Key, encryption_key: &Key) -> io::Result<Vec<u8>> {
-	if payload.len() < 64 {
-		return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "missing mac tag or salt"));
-	}
-
-	let salt_and_ciphertext = &payload[..payload.len() - 32];
-	let mac = CtOutput::new(hmac::digest::Output::<Hmac<Sha256>>::clone_from_slice(&payload[payload.len() - 32..]));
-	let calculated_mac = {
-		let mut hmac = Hmac::<Sha256>::new_from_slice(&mac_key[..]).expect("unexpected");
-		hmac.update(id);
-		hmac.update(salt_and_ciphertext);
-		hmac.finalize()
-	};
-
-	if calculated_mac != mac {
-		return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "invalid mac tag"));
-	}
-
-	let salt = &salt_and_ciphertext[..32];
-	let ciphertext = &salt_and_ciphertext[32..];
-
-	let salted_encryption_key = derive_deterministic_encryption_key(encryption_key, salt);
-	let plaintext = chacha20_process(&salted_encryption_key, ciphertext);
-
-	Ok(plaintext)
 }
 
 
@@ -378,14 +243,6 @@ fn hmac(key: &Key, data: &[u8]) -> CtOutput<Hmac<Sha256>> {
 	let mut hmac = Hmac::<Sha256>::new_from_slice(&key[..]).expect("unexpected");
 	hmac.update(data);
 	hmac.finalize()
-}
-
-
-fn chacha20_process(key: &Key, data: &[u8]) -> Vec<u8> {
-	let mut result = data.to_vec();
-	let mut chacha = ChaCha20Legacy::new(chacha20::Key::from_slice(&key[..]), &[0, 0, 0, 0, 0, 0, 0, 0].into());
-	chacha.apply_keystream(&mut result);
-	result
 }
 
 
@@ -428,103 +285,61 @@ impl Default for EncryptionParameters {
 
 #[cfg(test)]
 mod tests {
-	use super::{
-		decrypt_from_file, deterministic_decryption, deterministic_encryption, encrypt_to_file, sha256, FileKeySuite, Key, LoginKey, MasterKey, NetworkKeySuite,
-	};
+	use super::{decrypt_from_file, encrypt_to_file, sha256, FileKeySuite, NetworkKeySuite};
 	use rand::{OsRng, Rng};
 	use std::io::Cursor;
 
-	// Test the deterministic encryption functions.
+	// Basic santiy checks on NetworkKeySuite (the underlying SIV encryption is tested in the siv module)
 	#[test]
-	fn test_deterministic_encryption() {
+	fn test_network_key_suite() {
 		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-		let id: [u8; 32] = rng.gen();
-		let data = rng.gen_iter::<u8>().take(1034).collect::<Vec<u8>>();
-		let salt_key = Key::from_rng(&mut rng);
-		let mac_key = Key::from_rng(&mut rng);
-		let encryption_key = Key::from_rng(&mut rng);
+		let username = "testuser";
+		let password = "testpassword";
+		let keys = NetworkKeySuite::derive(username.as_bytes(), password.as_bytes());
+		let bad_keys = NetworkKeySuite::derive(username.as_bytes(), "badpassword".as_bytes());
 
-		let (ciphertext, mac) = deterministic_encryption(&id, &data, &salt_key, &mac_key, &encryption_key);
-		let (ciphertext2, mac2) = deterministic_encryption(&id, &data, &salt_key, &mac_key, &encryption_key);
-		let mut ciphertext_and_mac = [&ciphertext[..], &mac[..]].concat();
+		// Keys should be different if password is different
+		assert_ne!(keys, bad_keys);
 
-		let plaintext = deterministic_decryption(&id, &ciphertext_and_mac, &mac_key, &encryption_key).unwrap();
+		// Encrypt and decrypt
+		let plaintext = rng.gen_iter::<u8>().take(2017).collect::<Vec<u8>>();
+		let id = rng.gen_iter::<u8>().take(32).collect::<Vec<u8>>();
+		let bad_id = rng.gen_iter::<u8>().take(32).collect::<Vec<u8>>();
+		let ciphertext = keys.encrypt_object(&id, &plaintext);
 
-		assert_eq!(plaintext, data);
-		assert_eq!(ciphertext, ciphertext2);
-		assert_eq!(mac, mac2);
+		assert_eq!(plaintext, keys.decrypt_object(&id, &ciphertext).unwrap());
+		assert!(keys.decrypt_object(&bad_id, &ciphertext).is_err());
+		assert!(bad_keys.decrypt_object(&id, &ciphertext).is_err());
 
-		// Make sure it really is using a different key for different data
-		let mut data2 = data.clone();
-		data2[data.len() - 1] ^= 1;
-		let (ciphertext3, mac3) = deterministic_encryption(&id, &data2, &salt_key, &mac_key, &encryption_key);
+		// Check that the same keys are derived from the same username and password
+		assert_eq!(keys, NetworkKeySuite::derive(username.as_bytes(), password.as_bytes()));
 
-		assert_ne!(ciphertext, ciphertext3);
-		assert_ne!(mac, mac3);
-		// If it were using the same key, these parts of the ciphertext would be the same (because a stream cipher is used)
-		assert_ne!(&ciphertext[32..ciphertext.len() - 1], &ciphertext3[32..ciphertext3.len() - 1]);
-
-		// Make sure it is verifying the mac
-		ciphertext_and_mac[60] ^= 1;
-
-		assert!(deterministic_decryption(&id, &ciphertext_and_mac, &mac_key, &encryption_key).is_err());
+		// Check that different keys are derived from different usernames
+		assert_ne!(keys, NetworkKeySuite::derive("differentuser".as_bytes(), password.as_bytes()));
 	}
 
-	// Sanity check to make sure we didn't typo any of the key derivations.
+
+	// Basic santiy checks on FileKeySuite (the underlying SIV encryption is tested in the siv module)
 	#[test]
-	fn test_derived_keys_are_different() {
+	fn test_file_key_suite() {
 		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-		let username = rng.gen_iter::<u8>().take(15).collect::<Vec<u8>>();
-		let password = rng.gen_iter::<u8>().take(20).collect::<Vec<u8>>();
+		let password = "testpassword";
 		let params = Default::default();
+		let keys = FileKeySuite::derive(password.as_bytes(), &params).unwrap();
+		let bad_keys = FileKeySuite::derive("badpassword".as_bytes(), &params).unwrap();
 
-		let master_key = MasterKey::derive(&username, &password);
-		let login_key = LoginKey::derive(&master_key);
-		let file_key_suite = FileKeySuite::derive(&password, &params);
-		let network_key_suite = NetworkKeySuite::derive(&master_key);
+		// Keys should be different if password is different
+		assert_ne!(keys, bad_keys);
 
-		let keys = [
-			master_key.0,
-			login_key.0,
-			file_key_suite.salt_key.0,
-			file_key_suite.mac_key.0,
-			file_key_suite.encryption_key.0,
-			network_key_suite.salt_key.0,
-			network_key_suite.mac_key.0,
-			network_key_suite.encryption_key.0,
-		];
+		// Encrypt and decrypt
+		let plaintext = rng.gen_iter::<u8>().take(2017).collect::<Vec<u8>>();
+		let ciphertext = keys.encrypt_object(&plaintext);
 
-		for i in 0..keys.len() {
-			for j in 0..keys.len() {
-				if i == j {
-					continue;
-				}
+		assert_eq!(plaintext, keys.decrypt_object(&ciphertext).unwrap());
+		assert!(bad_keys.decrypt_object(&ciphertext).is_err());
 
-				assert_ne!(keys[i], keys[j]);
-			}
-		}
-	}
-
-	// Test to make sure that ID is authenticated
-	#[test]
-	fn test_id_is_authenticated() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-		let id: [u8; 32] = rng.gen();
-		let bad_id: [u8; 32] = rng.gen();
-		let data = rng.gen_iter::<u8>().take(1034).collect::<Vec<u8>>();
-		let salt_key: Key = rng.gen();
-		let mac_key: Key = rng.gen();
-		let encryption_key: Key = rng.gen();
-
-		let (ciphertext, mac) = deterministic_encryption(&id, &data, &salt_key, &mac_key, &encryption_key);
-		let mut ciphertext_and_mac = ciphertext.clone();
-		ciphertext_and_mac.extend_from_slice(&mac[..]);
-
-		let plaintext = deterministic_decryption(&id, &ciphertext_and_mac, &mac_key, &encryption_key).unwrap();
-
-		assert_eq!(plaintext, data);
-
-		assert!(deterministic_decryption(&bad_id, &ciphertext_and_mac, &mac_key, &encryption_key).is_err());
+		// Check that the same keys are derived from the same password
+		assert_eq!(keys, FileKeySuite::derive(password.as_bytes(), &params).unwrap());
 	}
 
 	// Make sure errors are thrown for the various kinds of file corruption
@@ -534,7 +349,7 @@ mod tests {
 		let payload = b"payloada";
 		let password = b"password";
 		let encryption_parameters = Default::default();
-		let file_key_suite = FileKeySuite::derive(password, &encryption_parameters);
+		let file_key_suite = FileKeySuite::derive(password, &encryption_parameters).unwrap();
 
 		let encrypted_data = {
 			let mut buffer = Vec::new();
