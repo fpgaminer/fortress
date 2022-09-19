@@ -1,12 +1,3 @@
-extern crate libfortress;
-extern crate serde;
-#[macro_use]
-extern crate serde_derive;
-#[macro_use]
-extern crate serde_json;
-extern crate data_encoding;
-extern crate tiny_http;
-
 mod sync_server;
 
 use libfortress::{Database, Entry, EntryHistory};

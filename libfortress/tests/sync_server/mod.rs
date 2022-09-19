@@ -1,7 +1,9 @@
 // A simplified in-memory Fortress server used for sync tests
 use data_encoding::HEXLOWER_PERMISSIVE;
-use libfortress::{fortresscrypto::MacTag, ID};
-use serde_json;
+use fortresscrypto::MacTag;
+use libfortress::ID;
+use serde::Deserialize;
+use serde_json::json;
 use std::{collections::HashMap, thread};
 use tiny_http::{Method, Response, Server};
 

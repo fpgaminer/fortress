@@ -3,7 +3,6 @@ use chacha20::{
 	ChaCha20,
 };
 use hmac::{Hmac, Mac};
-use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::Sha512;
 
@@ -88,18 +87,17 @@ impl SivEncryptionKeys {
 
 #[cfg(test)]
 mod tests {
-	use crate::siv::{HmacKey, SivEncryptionKeys};
-	use rand::{OsRng, Rng};
+	use crate::siv::SivEncryptionKeys;
+	use rand::{rngs::OsRng, seq::SliceRandom, Rng};
 
 	// Test that the encryption functions are deterministic
 	#[test]
 	fn test_deterministic_encryption() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-		let id: [u8; 32] = rng.gen();
-		let data = rng.gen_iter::<u8>().take(1034).collect::<Vec<u8>>();
+		let id: [u8; 32] = OsRng.gen();
+		let data = (0..1034).map(|_| OsRng.gen()).collect::<Vec<u8>>();
 		let keys = SivEncryptionKeys {
-			siv_key: HmacKey::from_rng(&mut rng),
-			cipher_key: HmacKey::from_rng(&mut rng),
+			siv_key: OsRng.gen(),
+			cipher_key: OsRng.gen(),
 		};
 
 		let (siv1, ciphertext1) = keys.encrypt(&id, &data);
@@ -115,13 +113,12 @@ mod tests {
 	// Test that the encryption functions use different keys for different inputs
 	#[test]
 	fn test_different_keys() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-		let id1: [u8; 32] = rng.gen();
-		let id2: [u8; 32] = rng.gen();
-		let data = rng.gen_iter::<u8>().take(1034).collect::<Vec<u8>>();
+		let id1: [u8; 32] = OsRng.gen();
+		let id2: [u8; 32] = OsRng.gen();
+		let data = (0..1034).map(|_| OsRng.gen()).collect::<Vec<u8>>();
 		let keys = SivEncryptionKeys {
-			siv_key: HmacKey::from_rng(&mut rng),
-			cipher_key: HmacKey::from_rng(&mut rng),
+			siv_key: OsRng.gen(),
+			cipher_key: OsRng.gen(),
 		};
 
 		let (siv1, ciphertext1) = keys.encrypt(&id1, &data);
@@ -145,36 +142,34 @@ mod tests {
 	// Make sure it is verifying integrity of the ciphertext
 	#[test]
 	fn test_integrity() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-		let id: [u8; 32] = rng.gen();
-		let data = rng.gen_iter::<u8>().take(1034).collect::<Vec<u8>>();
+		let id: [u8; 32] = OsRng.gen();
+		let data = (0..1034).map(|_| OsRng.gen()).collect::<Vec<u8>>();
 		let keys = SivEncryptionKeys {
-			siv_key: HmacKey::from_rng(&mut rng),
-			cipher_key: HmacKey::from_rng(&mut rng),
+			siv_key: OsRng.gen(),
+			cipher_key: OsRng.gen(),
 		};
 
 		let (siv, mut ciphertext) = keys.encrypt(&id, &data);
 
 		// Make sure it is verifying the ciphertext
-		*rng.choose_mut(&mut ciphertext).unwrap() ^= 1;
+		*ciphertext.choose_mut(&mut OsRng).unwrap() ^= 1;
 		assert!(keys.decrypt(&id, &siv, &ciphertext).is_none());
 
 		// Make sure it is verifying the siv
 		let mut siv2 = siv.clone();
-		siv2.0[rng.gen_range(0, siv2.0.len())] ^= 1;
+		*siv2.0.choose_mut(&mut OsRng).unwrap() ^= 1;
 		assert!(keys.decrypt(&id, &siv2, &ciphertext).is_none());
 	}
 
 	// Make sure it is verifying the id
 	#[test]
 	fn test_id() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-		let id: [u8; 32] = rng.gen();
-		let bad_id: [u8; 32] = rng.gen();
-		let data = rng.gen_iter::<u8>().take(1034).collect::<Vec<u8>>();
+		let id: [u8; 32] = OsRng.gen();
+		let bad_id: [u8; 32] = OsRng.gen();
+		let data = (0..1034).map(|_| OsRng.gen()).collect::<Vec<u8>>();
 		let keys = SivEncryptionKeys {
-			siv_key: HmacKey::from_rng(&mut rng),
-			cipher_key: HmacKey::from_rng(&mut rng),
+			siv_key: OsRng.gen(),
+			cipher_key: OsRng.gen(),
 		};
 
 		let (siv, ciphertext) = keys.encrypt(&id, &data);

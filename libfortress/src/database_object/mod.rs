@@ -1,6 +1,8 @@
 mod directory;
 mod entry;
 
+use serde::{Deserialize, Serialize};
+
 pub use self::{
 	directory::{Directory, DirectoryHistoryAction},
 	entry::{Entry, EntryHistory},

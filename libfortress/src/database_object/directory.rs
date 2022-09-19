@@ -1,5 +1,6 @@
-use super::super::{serde, unix_timestamp, Database, ID};
-use rand::{OsRng, Rng};
+use super::super::{unix_timestamp, Database, ID};
+use rand::{rngs::OsRng, Rng};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 
@@ -16,10 +17,8 @@ pub struct Directory {
 
 impl Directory {
 	pub fn new() -> Directory {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-
 		Directory {
-			id: rng.gen(),
+			id: OsRng.gen(),
 			entries: HashSet::new(),
 			history: Vec::new(),
 		}
@@ -194,22 +193,20 @@ pub enum DirectoryHistoryAction {
 mod tests {
 	use super::{Directory, DirectoryHistory, DirectoryHistoryAction};
 	use crate::tests::quick_sleep;
-	use rand::{OsRng, Rng};
+	use rand::{rngs::OsRng, Rng};
 	use serde_json;
 
 	#[test]
 	fn history_must_be_ordered() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-
 		let mut bad_directory1 = Directory::new();
 		bad_directory1.history = vec![
 			DirectoryHistory {
-				id: rng.gen(),
+				id: OsRng.gen(),
 				action: DirectoryHistoryAction::Add,
 				time: 50,
 			},
 			DirectoryHistory {
-				id: rng.gen(),
+				id: OsRng.gen(),
 				action: DirectoryHistoryAction::Add,
 				time: 0,
 			},
@@ -222,11 +219,9 @@ mod tests {
 	// Cannot add IDs that already exist or delete IDs that don't exist
 	#[test]
 	fn history_must_be_consistent() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-
 		{
 			let mut bad_directory = Directory::new();
-			let id1 = rng.gen();
+			let id1 = OsRng.gen();
 			bad_directory.history = vec![
 				DirectoryHistory {
 					id: id1,
@@ -247,7 +242,7 @@ mod tests {
 		{
 			let mut bad_directory = Directory::new();
 			bad_directory.history = vec![DirectoryHistory {
-				id: rng.gen(),
+				id: OsRng.gen(),
 				action: DirectoryHistoryAction::Remove,
 				time: 0,
 			}];
@@ -260,9 +255,8 @@ mod tests {
 	#[test]
 	#[should_panic]
 	fn bad_add_should_panic1() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
 		let mut directory = Directory::new();
-		let id = rng.gen();
+		let id = OsRng.gen();
 		directory.add(id);
 		quick_sleep();
 		directory.add(id);
@@ -271,26 +265,23 @@ mod tests {
 	#[test]
 	#[should_panic]
 	fn bad_add_should_panic2() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
 		let mut directory = Directory::new();
-		directory.add_with_time(rng.gen(), 42);
-		directory.add_with_time(rng.gen(), 0);
+		directory.add_with_time(OsRng.gen(), 42);
+		directory.add_with_time(OsRng.gen(), 0);
 	}
 
 	#[test]
 	#[should_panic]
 	fn bad_remove_should_panic1() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
 		let mut directory = Directory::new();
-		directory.remove(rng.gen());
+		directory.remove(OsRng.gen());
 	}
 
 	#[test]
 	#[should_panic]
 	fn bad_remove_should_panic2() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
 		let mut directory = Directory::new();
-		let id = rng.gen();
+		let id = OsRng.gen();
 		directory.add_with_time(id, 1000);
 		directory.remove_with_time(id, 999);
 	}
@@ -298,14 +289,12 @@ mod tests {
 	// Tests merge and safe_to_replace_with
 	#[test]
 	fn merge_and_supersets() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-
 		// Merge should fail if IDs don't match
 		{
 			let mut directory1 = Directory::new();
-			directory1.add(rng.gen());
+			directory1.add(OsRng.gen());
 			let mut directory2 = directory1.clone();
-			directory2.id = rng.gen();
+			directory2.id = OsRng.gen();
 			assert!(directory1.merge(&directory2).is_none());
 			assert!(!directory1.safe_to_replace_with(&directory2));
 		}
@@ -313,10 +302,10 @@ mod tests {
 		// Merge should fail on conflict
 		{
 			let mut directory1 = Directory::new();
-			directory1.add(rng.gen());
+			directory1.add(OsRng.gen());
 			quick_sleep();
 			let mut directory2 = directory1.clone();
-			let id = rng.gen();
+			let id = OsRng.gen();
 			directory1.add(id);
 			quick_sleep();
 			directory2.add(id);
@@ -328,28 +317,28 @@ mod tests {
 		{
 			let mut directory1 = Directory::new();
 			let mut directory2 = directory1.clone();
-			directory1.add(rng.gen());
+			directory1.add(OsRng.gen());
 			quick_sleep();
-			directory2.add(rng.gen());
+			directory2.add(OsRng.gen());
 			assert!(!directory1.safe_to_replace_with(&directory2));
 		}
 
 		// Always safe to replace after merging
 		{
 			let mut directory1 = Directory::new();
-			directory1.add(rng.gen());
+			directory1.add(OsRng.gen());
 			quick_sleep();
-			let id = rng.gen();
+			let id = OsRng.gen();
 			directory1.add(id);
 			quick_sleep();
-			directory1.add(rng.gen());
+			directory1.add(OsRng.gen());
 			quick_sleep();
 			let mut directory2 = directory1.clone();
-			directory2.add(rng.gen());
+			directory2.add(OsRng.gen());
 			quick_sleep();
 			directory2.remove(id);
 			quick_sleep();
-			directory1.add(rng.gen());
+			directory1.add(OsRng.gen());
 
 			assert_eq!(directory1.safe_to_replace_with(&directory2), false);
 			let merged1 = directory1.merge(&directory2).unwrap();

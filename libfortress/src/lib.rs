@@ -22,18 +22,6 @@
 // add versioning the next time the format changes, and to change the way the
 // network and login keys are calculated to prevent old versions from syncing.
 // We can then have a plan for more graceful versioning going forward.
-extern crate rand;
-#[macro_use]
-extern crate serde_derive;
-extern crate byteorder;
-extern crate data_encoding;
-pub extern crate fortresscrypto;
-extern crate reqwest;
-extern crate serde;
-extern crate serde_json;
-extern crate subtle;
-extern crate tempfile;
-
 #[macro_use]
 mod newtype_macros;
 mod database_object;
@@ -42,11 +30,11 @@ pub mod sync_parameters;
 
 pub use crate::database_object::{Directory, Entry, EntryHistory};
 
-use crate::database_object::DatabaseObject;
-use crate::database_object_map::DatabaseObjectMap;
+use crate::{database_object::DatabaseObject, database_object_map::DatabaseObjectMap, sync_parameters::SyncParameters};
 use fortresscrypto::{CryptoError, EncryptedObject, EncryptionParameters, FileKeySuite, LoginId, LoginKey, SIV};
-use rand::{OsRng, Rng};
+use rand::{rngs::OsRng, seq::SliceRandom, Rng};
 use reqwest::{IntoUrl, Url};
+use serde::{Deserialize, Serialize};
 use std::{
 	collections::HashSet,
 	fs::File,
@@ -54,7 +42,6 @@ use std::{
 	path::Path,
 	str,
 };
-use crate::sync_parameters::SyncParameters;
 use tempfile::NamedTempFile;
 
 
@@ -627,7 +614,6 @@ mod hex_format {
 
 
 pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: bool, others: &str) -> String {
-	let mut rng = OsRng::new().expect("OsRng failed to initialize");
 	let alphabet_uppercase = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 	let alphabet_lowercase = "abcdefghijklmnopqrstuvwxyz";
 	let alphabet_numbers = "0123456789";
@@ -657,7 +643,7 @@ pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: b
 	let mut result = String::new();
 
 	for _ in 0..length {
-		result.push(rng.choose(&alphabet).unwrap().clone());
+		result.push(alphabet.choose(&mut OsRng).unwrap().clone());
 	}
 
 	result
@@ -680,8 +666,8 @@ fn unix_timestamp() -> u64 {
 
 #[cfg(test)]
 mod tests {
-	use super::{random_string, serde_json, Database, DatabaseObject, Directory, Entry, EntryHistory, ID};
-	use rand::{OsRng, Rng};
+	use super::{random_string, Database, DatabaseObject, Directory, Entry, EntryHistory, ID};
+	use rand::{rngs::OsRng, Rng};
 	use std::collections::HashMap;
 	use tempfile::tempdir;
 
@@ -691,9 +677,8 @@ mod tests {
 
 	#[test]
 	fn encrypt_then_decrypt() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-		let password_len = rng.gen_range(0, 64);
-		let password: String = rng.gen_iter::<char>().take(password_len).collect();
+		let password_len = OsRng.gen_range(0..64);
+		let password: String = (0..password_len).map(|_| OsRng.gen::<char>()).collect();
 		let tmp_dir = tempdir().unwrap();
 
 		let mut db = Database::new_with_password("username", &password);
@@ -821,29 +806,28 @@ mod tests {
 	#[test]
 	fn test_unicode() {
 		let tmp_dir = tempdir().unwrap();
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
 
 		// Unicode in username and password
-		let username: String = rng.gen_iter::<char>().take(256).collect();
-		let password: String = rng.gen_iter::<char>().take(256).collect();
+		let username: String = (0..256).map(|_| OsRng.gen::<char>()).collect();
+		let password: String = (0..256).map(|_| OsRng.gen::<char>()).collect();
 		let mut db = Database::new_with_password(&username, &password);
 
 		// Unicode in entries
-		let a = rng.gen_iter::<char>().take(256).collect::<String>();
-		let b = rng.gen_iter::<char>().take(256).collect::<String>();
-		let c = rng.gen_iter::<char>().take(256).collect::<String>();
+		let a: String = (0..256).map(|_| OsRng.gen::<char>()).collect();
+		let b: String = (0..256).map(|_| OsRng.gen::<char>()).collect();
+		let c: String = (0..256).map(|_| OsRng.gen::<char>()).collect();
 
 		let mut entry = Entry::new();
 		entry.edit(EntryHistory::new(HashMap::new()));
 		entry.edit(EntryHistory::new(
 			[
 				(
-					rng.gen_iter::<char>().take(256).collect::<String>(),
-					rng.gen_iter::<char>().take(256).collect::<String>(),
+					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
+					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
 				),
 				(
-					rng.gen_iter::<char>().take(256).collect::<String>(),
-					rng.gen_iter::<char>().take(256).collect::<String>(),
+					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
+					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
 				),
 				(a.clone(), b.clone()),
 			]
@@ -854,16 +838,16 @@ mod tests {
 		entry.edit(EntryHistory::new(
 			[
 				(
-					rng.gen_iter::<char>().take(256).collect::<String>(),
-					rng.gen_iter::<char>().take(256).collect::<String>(),
+					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
+					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
 				),
 				(
-					rng.gen_iter::<char>().take(256).collect::<String>(),
-					rng.gen_iter::<char>().take(256).collect::<String>(),
+					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
+					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
 				),
 				(
-					rng.gen_iter::<char>().take(256).collect::<String>(),
-					rng.gen_iter::<char>().take(256).collect::<String>(),
+					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
+					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
 				),
 				(a.clone(), c.clone()),
 			]
@@ -1073,14 +1057,12 @@ mod tests {
 	// Test to make sure serialization is fully deterministic (the same database object serializes to the same string every time)
 	#[test]
 	fn directory_deterministic_serialization() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-
 		// Create directory
 		let mut directory = Directory::new();
 
-		let id1: ID = rng.gen();
-		let id2: ID = rng.gen();
-		let id3: ID = rng.gen();
+		let id1: ID = OsRng.gen();
+		let id2: ID = OsRng.gen();
+		let id3: ID = OsRng.gen();
 
 		directory.add(id1.clone());
 		quick_sleep();

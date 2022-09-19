@@ -54,7 +54,7 @@ macro_rules! newtype_from_slice (($newtype:ident, $len:expr) => (
         Some(n)
     }
 
-	pub fn from_rng<R: Rng>(rng: &mut R) -> $newtype {
+	pub fn from_rng<R: Rng + ?Sized>(rng: &mut R) -> $newtype {
 		let mut n = $newtype([0; $len]);
 		{
 			let $newtype(ref mut b) = n;
@@ -65,8 +65,8 @@ macro_rules! newtype_from_slice (($newtype:ident, $len:expr) => (
 ));
 
 macro_rules! newtype_traits (($newtype:ident, $len:expr) => (
-	impl ::rand::Rand for $newtype {
-		fn rand<R: Rng>(rng: &mut R) -> $newtype {
+	impl ::rand::distributions::Distribution<$newtype> for ::rand::distributions::Standard {
+		fn sample<R: ::rand::Rng + ?Sized>(&self, rng: &mut R) -> $newtype {
 			$newtype::from_rng(rng)
 		}
 	}

@@ -8,10 +8,10 @@ description = "Cryptography helper library for fortress"
 edition = "2021"
 
 [dependencies]
-byteorder = "1.0"
-rand = "0.3"
-data-encoding = "2.0.0-rc.1"
-serde = { version = "1.0", features = ["derive"] }
+byteorder = "1"
+rand = { version = "0.8.5", features = ["std"] }
+data-encoding = "2.3.2"
+serde = { version = "1", features = ["derive"] }
 password-hash = "0.4.2"
 scrypt = { version = "0.10.0", default-features = false }
 subtle = "2.4.1"

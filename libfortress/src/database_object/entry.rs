@@ -1,5 +1,6 @@
-use super::super::{serde, unix_timestamp, ID};
-use rand::{OsRng, Rng};
+use super::super::{unix_timestamp, ID};
+use rand::{rngs::OsRng, Rng};
+use serde::{Deserialize, Serialize};
 use std::{
 	borrow::Borrow,
 	cmp,
@@ -23,9 +24,7 @@ pub struct Entry {
 
 impl Entry {
 	pub fn new() -> Entry {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-
-		Entry::inner_new(rng.gen(), Vec::new(), unix_timestamp()).unwrap()
+		Entry::inner_new(OsRng.gen(), Vec::new(), unix_timestamp()).unwrap()
 	}
 
 	fn inner_new(id: ID, history: Vec<EntryHistory>, time_created: u64) -> Option<Entry> {
@@ -217,8 +216,6 @@ where
 	K: Eq + Hash + Ord + serde::Serialize,
 	V: serde::Serialize,
 {
-	use serde::Serialize;
-
 	let ordered: BTreeMap<_, _> = value.iter().collect();
 	ordered.serialize(serializer)
 }
@@ -227,20 +224,20 @@ where
 #[cfg(test)]
 mod tests {
 	use super::{Entry, EntryHistory};
-	use rand::{OsRng, Rng};
-	use serde_json;
 	use crate::unix_timestamp;
+	use rand::{rngs::OsRng, Rng};
+	use serde_json;
 
-	fn random_entry_history<T: Rng>(rng: &mut T, time: Option<u64>) -> EntryHistory {
+	fn random_entry_history(time: Option<u64>) -> EntryHistory {
 		EntryHistory {
 			data: [
 				(
-					rng.gen_iter::<char>().take(256).collect::<String>(),
-					rng.gen_iter::<char>().take(256).collect::<String>(),
+					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
+					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
 				),
 				(
-					rng.gen_iter::<char>().take(256).collect::<String>(),
-					rng.gen_iter::<char>().take(256).collect::<String>(),
+					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
+					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
 				),
 			]
 			.iter()
@@ -252,10 +249,8 @@ mod tests {
 
 	#[test]
 	fn history_must_be_ordered() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-
 		let mut entry = Entry::new();
-		entry.history = vec![random_entry_history(&mut rng, Some(50)), random_entry_history(&mut rng, Some(0))];
+		entry.history = vec![random_entry_history(Some(50)), random_entry_history(Some(0))];
 
 		let serialized = serde_json::to_string(&entry).unwrap();
 		assert!(serde_json::from_str::<Entry>(&serialized).is_err());
@@ -264,23 +259,20 @@ mod tests {
 	#[test]
 	#[should_panic]
 	fn bad_edit_should_panic() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
 		let mut entry = Entry::new();
-		entry.edit(random_entry_history(&mut rng, Some(42)));
-		entry.edit(random_entry_history(&mut rng, Some(0)));
+		entry.edit(random_entry_history(Some(42)));
+		entry.edit(random_entry_history(Some(0)));
 	}
 
 	// Tests merge and safe_to_replace_with
 	#[test]
 	fn merge_and_supersets() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-
 		// Merge should fail if IDs don't match
 		{
 			let mut entry1 = Entry::new();
-			entry1.edit(random_entry_history(&mut rng, None));
+			entry1.edit(random_entry_history(None));
 			let mut entry2 = entry1.clone();
-			entry2.id = rng.gen();
+			entry2.id = OsRng.gen();
 
 			assert!(entry1.merge(&entry2).is_none());
 			assert!(!entry1.safe_to_replace_with(&entry2));
@@ -289,10 +281,10 @@ mod tests {
 		// Merge should fail on conflict
 		{
 			let mut entry1 = Entry::new();
-			entry1.edit(random_entry_history(&mut rng, None));
+			entry1.edit(random_entry_history(None));
 			let mut entry2 = entry1.clone();
-			entry2.edit(random_entry_history(&mut rng, None));
-			entry1.edit(random_entry_history(&mut rng, None));
+			entry2.edit(random_entry_history(None));
+			entry1.edit(random_entry_history(None));
 
 			assert!(entry1.merge(&entry2).is_none());
 			assert!(!entry1.safe_to_replace_with(&entry2));
@@ -301,10 +293,10 @@ mod tests {
 		// Always safe to replace after merging
 		{
 			let mut entry1 = Entry::new();
-			entry1.edit(random_entry_history(&mut rng, None));
-			entry1.edit(random_entry_history(&mut rng, None));
+			entry1.edit(random_entry_history(None));
+			entry1.edit(random_entry_history(None));
 			let mut entry2 = entry1.clone();
-			entry2.edit(random_entry_history(&mut rng, None));
+			entry2.edit(random_entry_history(None));
 
 			assert_eq!(entry2.safe_to_replace_with(&entry1), false);
 			let merged1 = entry1.merge(&entry2).unwrap();

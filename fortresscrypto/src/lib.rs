@@ -6,7 +6,7 @@ mod siv;
 use byteorder::{LittleEndian, ReadBytesExt};
 pub use error::CryptoError;
 use hmac::{digest::CtOutput, Hmac, Mac};
-use rand::{OsRng, Rng};
+use rand::{rngs::OsRng, Rng};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use siv::SivEncryptionKeys;
@@ -262,13 +262,11 @@ pub struct EncryptionParameters {
 impl Default for EncryptionParameters {
 	#[cfg(debug_assertions)]
 	fn default() -> EncryptionParameters {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-
 		EncryptionParameters {
 			log_n: 8,
 			r: 8,
 			p: 1,
-			salt: rng.gen(),
+			salt: OsRng.gen(),
 		}
 	}
 	#[cfg(not(debug_assertions))]
@@ -288,13 +286,12 @@ impl Default for EncryptionParameters {
 #[cfg(test)]
 mod tests {
 	use super::{decrypt_from_file, encrypt_to_file, sha256, FileKeySuite, NetworkKeySuite};
-	use rand::{OsRng, Rng};
+	use rand::{rngs::OsRng, seq::SliceRandom, Rng};
 	use std::io::Cursor;
 
 	// Basic santiy checks on NetworkKeySuite (the underlying SIV encryption is tested in the siv module)
 	#[test]
 	fn test_network_key_suite() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
 		let username = "testuser";
 		let password = "testpassword";
 		let keys = NetworkKeySuite::derive(username.as_bytes(), password.as_bytes());
@@ -304,9 +301,9 @@ mod tests {
 		assert_ne!(keys, bad_keys);
 
 		// Encrypt and decrypt
-		let plaintext = rng.gen_iter::<u8>().take(2017).collect::<Vec<u8>>();
-		let id = rng.gen_iter::<u8>().take(32).collect::<Vec<u8>>();
-		let bad_id = rng.gen_iter::<u8>().take(32).collect::<Vec<u8>>();
+		let plaintext = (0..2017).map(|_| OsRng.gen()).collect::<Vec<u8>>();
+		let id: [u8; 32] = OsRng.gen();
+		let bad_id: [u8; 32] = OsRng.gen();
 		let ciphertext = keys.encrypt_object(&id, &plaintext);
 
 		assert_eq!(plaintext, keys.decrypt_object(&id, &ciphertext).unwrap());
@@ -324,7 +321,6 @@ mod tests {
 	// Basic santiy checks on FileKeySuite (the underlying SIV encryption is tested in the siv module)
 	#[test]
 	fn test_file_key_suite() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
 		let password = "testpassword";
 		let params = Default::default();
 		let keys = FileKeySuite::derive(password.as_bytes(), &params).unwrap();
@@ -334,7 +330,7 @@ mod tests {
 		assert_ne!(keys, bad_keys);
 
 		// Encrypt and decrypt
-		let plaintext = rng.gen_iter::<u8>().take(2017).collect::<Vec<u8>>();
+		let plaintext = (0..2017).map(|_| OsRng.gen()).collect::<Vec<u8>>();
 		let ciphertext = keys.encrypt_object(&plaintext);
 
 		assert_eq!(plaintext, keys.decrypt_object(&ciphertext).unwrap());
@@ -347,7 +343,6 @@ mod tests {
 	// Make sure errors are thrown for the various kinds of file corruption
 	#[test]
 	fn file_corruption() {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
 		let payload = b"payloada";
 		let password = b"password";
 		let encryption_parameters = Default::default();
@@ -363,12 +358,12 @@ mod tests {
 
 		// Run tests a few times (they're random)
 		for _ in 0..64 {
-			let mutation_byte: u8 = rng.gen();
+			let mutation_byte: u8 = OsRng.gen();
 
-			let truncated = &encrypted_data[..encrypted_data.len() - rng.gen_range(1, encrypted_data.len())];
+			let truncated = &encrypted_data[..encrypted_data.len() - OsRng.gen_range(1..encrypted_data.len())];
 			let corrupted_checksum = {
 				let mut buffer = encrypted_data.clone();
-				rng.choose_mut(&mut buffer).map(|x| *x ^= mutation_byte);
+				buffer.choose_mut(&mut OsRng).map(|x| *x ^= mutation_byte);
 				buffer
 			};
 			let corrupted_mac = {
@@ -377,7 +372,7 @@ mod tests {
 				// This is because it might mutate the scrypt parameters to absurd values, which
 				// can cause the library to spin forever during tests.
 				// TODO: This isn't ideal as we'd like to test corrupting those bits too, but not sure how.
-				rng.choose_mut(&mut data[32..]).map(|x| *x ^= mutation_byte);
+				data[32..].choose_mut(&mut OsRng).map(|x| *x ^= mutation_byte);
 				let checksum = sha256(&data);
 				data.extend_from_slice(&checksum);
 				data

@@ -1,8 +1,5 @@
-use super::{
-	fortresscrypto::{self, LoginKey, NetworkKeySuite},
-	serde,
-};
-use fortresscrypto::LoginId;
+use fortresscrypto::{LoginId, LoginKey, NetworkKeySuite};
+use serde::{Deserialize, Serialize};
 
 
 // Encapsulate username, MasterKey, and all cached derivative data
