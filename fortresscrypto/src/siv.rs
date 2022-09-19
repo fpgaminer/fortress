@@ -4,6 +4,7 @@ use chacha20::{
 };
 use hmac::{Hmac, Mac};
 use rand::Rng;
+use serde::{Deserialize, Serialize};
 use sha2::Sha512;
 
 new_type!(secret HmacKey(128););
@@ -11,7 +12,7 @@ new_type!(secret HmacKey(128););
 new_type!(public SIV(32););
 
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct SivEncryptionKeys {
 	/// Used to calculate the siv for plaintext
 	siv_key: HmacKey,

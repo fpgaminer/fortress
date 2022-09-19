@@ -4,11 +4,13 @@ mod error;
 mod siv;
 
 use byteorder::{LittleEndian, ReadBytesExt};
-use error::CryptoError;
+pub use error::CryptoError;
 use hmac::{digest::CtOutput, Hmac, Mac};
 use rand::{OsRng, Rng};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use siv::{SivEncryptionKeys, SIV};
+use siv::SivEncryptionKeys;
+pub use siv::SIV;
 use std::{
 	io::{self, BufRead, Cursor, Read, Write},
 	str,
@@ -18,6 +20,7 @@ use std::{
 new_type!(secret Key(32););
 new_type!(public MacTag(32););
 new_type!(secret LoginKey(32););
+new_type!(public LoginId(32););
 
 
 // For cloud storage, we want the user's password to be _extremely_ hard to crack.
@@ -52,18 +55,21 @@ const LOGIN_USERNAME_SALT: Key = Key([
 ]);
 
 
-pub fn hash_username_for_login(username: &[u8]) -> Vec<u8> {
-	hmac(&LOGIN_USERNAME_SALT, username).into_bytes().to_vec()
+pub fn hash_username_for_login(username: &[u8]) -> LoginId {
+	LoginId::from_slice(&hmac(&LOGIN_USERNAME_SALT, username).into_bytes()).expect("internal error")
 }
 
 
-pub struct EncryptedObject(pub Vec<u8>);
+pub struct EncryptedObject {
+	pub siv: SIV,
+	pub ciphertext: Vec<u8>,
+}
 
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkKeySuite {
 	encryption_keys: SivEncryptionKeys,
-	login_key: LoginKey,
+	pub login_key: LoginKey,
 }
 
 impl NetworkKeySuite {
@@ -87,23 +93,19 @@ impl NetworkKeySuite {
 
 	pub fn encrypt_object(&self, id: &[u8], data: &[u8]) -> EncryptedObject {
 		let (siv, ciphertext) = self.encryption_keys.encrypt(id, data);
-		EncryptedObject([siv.as_ref(), ciphertext.as_slice()].concat())
+		EncryptedObject { siv, ciphertext }
 	}
 
 	// Deterministically decrypt payload, after validating mac.  Returns plaintext.
 	pub fn decrypt_object(&self, id: &[u8], encrypted_object: &EncryptedObject) -> Result<Vec<u8>, CryptoError> {
-		if encrypted_object.0.len() < 32 {
-			return Err(CryptoError::DecryptionError);
-		}
-
-		let (siv, ciphertext) = encrypted_object.0.split_at(32);
-		let siv = SIV::from_slice(siv).expect("internal error");
-		self.encryption_keys.decrypt(id, &siv, ciphertext).ok_or(CryptoError::DecryptionError)
+		self.encryption_keys
+			.decrypt(id, &encrypted_object.siv, &encrypted_object.ciphertext)
+			.ok_or(CryptoError::DecryptionError)
 	}
 }
 
 
-#[derive(Eq, PartialEq, Debug)]
+#[derive(Eq, PartialEq, Debug, Clone)]
 pub struct FileKeySuite {
 	encryption_keys: SivEncryptionKeys,
 }

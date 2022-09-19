@@ -44,7 +44,7 @@ pub use database_object::{Directory, Entry, EntryHistory};
 
 use database_object::DatabaseObject;
 use database_object_map::DatabaseObjectMap;
-use fortresscrypto::{EncryptionParameters, FileKeySuite, LoginKey, MacTag};
+use fortresscrypto::{CryptoError, EncryptedObject, EncryptionParameters, FileKeySuite, LoginId, LoginKey, SIV};
 use rand::{OsRng, Rng};
 use reqwest::{IntoUrl, Url};
 use std::{
@@ -54,7 +54,7 @@ use std::{
 	path::Path,
 	str,
 };
-use sync_parameters::{LoginId, SyncParameters};
+use sync_parameters::SyncParameters;
 use tempfile::NamedTempFile;
 
 
@@ -85,7 +85,7 @@ impl Database {
 		let password = password.as_ref();
 
 		let encryption_parameters = Default::default();
-		let file_key_suite = FileKeySuite::derive(password.as_bytes(), &encryption_parameters);
+		let file_key_suite = FileKeySuite::derive(password.as_bytes(), &encryption_parameters).unwrap(); // TODO: Don't unwrap
 
 		// TODO: Derive in a background thread
 		let sync_parameters = SyncParameters::new(username, password);
@@ -111,7 +111,7 @@ impl Database {
 		let password = password.as_ref();
 
 		self.encryption_parameters = Default::default();
-		self.file_key_suite = FileKeySuite::derive(password.as_bytes(), &self.encryption_parameters);
+		self.file_key_suite = FileKeySuite::derive(password.as_bytes(), &self.encryption_parameters).unwrap(); // TODO: Don't unwrap
 
 		// TODO: Derive in a background thread
 		self.sync_parameters = SyncParameters::new(username, password);
@@ -182,7 +182,7 @@ impl Database {
 		temp_path.persist(path).map_err(|e| e.error)
 	}
 
-	pub fn load_from_path<P: AsRef<Path>, A: AsRef<str>>(path: P, password: A) -> io::Result<Database> {
+	pub fn load_from_path<P: AsRef<Path>, A: AsRef<str>>(path: P, password: A) -> Result<Database, CryptoError> {
 		let password = password.as_ref();
 
 		// This struct is needed because Database has fields that aren't part of
@@ -203,7 +203,7 @@ impl Database {
 		};
 
 		// Deserialize
-		let db: SerializableDatabase = serde_json::from_slice(&plaintext)?;
+		let db: SerializableDatabase = serde_json::from_slice(&plaintext).unwrap(); // TODO!!!!! Don't unwrap
 
 		// Keep encryption keys for quicker saving later
 		Ok(Database {
@@ -218,7 +218,7 @@ impl Database {
 	}
 
 	// TODO: Sync should be performed in a separate background thread
-	// TODO: Instead of having library users call sync themselves, we should just an init method which sets up a continuous automatic
+	// TODO: Instead of having library users call sync themselves, we should just have an init method which sets up a continuous automatic
 	// background sync.
 	// TODO: Cleanup unwraps and add proper error handling
 	// TODO: Need to sync a "Restore" object that other clients can use to bootstrap from
@@ -290,17 +290,17 @@ impl Database {
 	// Upload object to fortress server
 	fn sync_api_update_object(&self, client: &reqwest::blocking::Client, url: &Url, object: &DatabaseObject) -> Result<(), ApiError> {
 		#[derive(Serialize, Debug)]
-		struct UpdateObjectRequest<'a, 'b, 'c, 'd, 'e> {
+		struct UpdateObjectRequest<'a, 'b, 'c, 'd> {
 			user_id: &'a LoginId,
 			user_key: &'b LoginKey,
 			object_id: &'c ID,
 			#[serde(with = "hex_format")]
 			data: &'d [u8],
-			data_mac: &'e MacTag,
+			mac: &'d [u8],
 		}
 
 		// Encrypt
-		let (ciphertext, mac) = {
+		let encrypted_object = {
 			let payload = serde_json::to_vec(&object).unwrap();
 			self.sync_parameters.get_network_key_suite().encrypt_object(&object.get_id()[..], &payload)
 		};
@@ -309,8 +309,8 @@ impl Database {
 			user_id: self.sync_parameters.get_login_id(),
 			user_key: self.sync_parameters.get_login_key(),
 			object_id: object.get_id(),
-			data: &ciphertext,
-			data_mac: &mac,
+			data: &encrypted_object.ciphertext,
+			mac: encrypted_object.siv.as_ref(),
 		};
 
 		let _: ApiEmptyResponse = api_request(&client, url.join("/update_object").unwrap(), &request)?;
@@ -330,7 +330,7 @@ impl Database {
 		#[derive(Serialize)]
 		struct DiffObjectRequestObject<'a> {
 			id: &'a ID,
-			mac: MacTag,
+			mac: SIV,
 		}
 
 		#[derive(Deserialize)]
@@ -349,9 +349,9 @@ impl Database {
 			// Calculate MAC
 			// TODO: This should be cached (and possibly saved out to file)
 			let payload = serde_json::to_vec(object).unwrap();
-			let (_, mac) = self.sync_parameters.get_network_key_suite().encrypt_object(&id[..], &payload);
+			let encrypted_object = self.sync_parameters.get_network_key_suite().encrypt_object(&id[..], &payload);
 
-			diff_object_request.objects.push(DiffObjectRequestObject { id: id, mac: mac });
+			diff_object_request.objects.push(DiffObjectRequestObject { id, mac: encrypted_object.siv });
 		}
 
 		let response: DiffObjectResponse = api_request(&client, url.join("/diff_objects").unwrap(), &diff_object_request)?;
@@ -373,7 +373,7 @@ impl Database {
 		struct GetObjectResponse {
 			#[serde(with = "hex_format")]
 			data: Vec<u8>,
-			mac: MacTag,
+			mac: SIV,
 		}
 
 		let request = GetObjectRequest {
@@ -383,9 +383,12 @@ impl Database {
 		};
 
 		let response: GetObjectResponse = api_request(&client, url.join("/get_object").unwrap(), &request)?;
-		let ciphertext = [&response.data[..], &response.mac[..]].concat();
+		let encrypted_object = EncryptedObject {
+			ciphertext: response.data,
+			siv: response.mac,
+		};
 
-		match self.sync_parameters.get_network_key_suite().decrypt_object(&id[..], &ciphertext) {
+		match self.sync_parameters.get_network_key_suite().decrypt_object(&id[..], &encrypted_object) {
 			Ok(plaintext) => Ok(Some(serde_json::from_slice(&plaintext).unwrap())),
 			Err(err) => {
 				println!("WARNING: Error while decrypting server object(ID: {:?}): {}", id, err);
@@ -410,9 +413,12 @@ impl Database {
 
 			// Decrypt
 			let plaintext = {
-				let ciphertext = [&update.data[..], &update.mac[..]].concat();
+				let encrypted_object = EncryptedObject {
+					ciphertext: update.data.clone(),
+					siv: update.mac,
+				};
 
-				match self.sync_parameters.get_network_key_suite().decrypt_object(&update.id[..], &ciphertext) {
+				match self.sync_parameters.get_network_key_suite().decrypt_object(&update.id[..], &encrypted_object) {
 					Ok(plaintext) => plaintext,
 					Err(err) => {
 						println!("WARNING: Error while decrypting server object: {}", err);
@@ -521,7 +527,7 @@ struct DiffObjectResponseUpdate {
 	id: ID,
 	#[serde(with = "hex_format")]
 	data: Vec<u8>,
-	mac: MacTag,
+	mac: SIV,
 }
 
 
@@ -731,7 +737,6 @@ mod tests {
 
 		// Changing username should change network keys even if using the same password
 		db.change_password("username2", "password");
-		assert_ne!(db.sync_parameters.get_master_key(), old_sync_parameters.get_master_key());
 		assert_ne!(db.sync_parameters.get_login_key(), old_sync_parameters.get_login_key());
 		assert_ne!(db.sync_parameters.get_login_id(), old_sync_parameters.get_login_id());
 		assert_ne!(db.sync_parameters.get_network_key_suite(), old_sync_parameters.get_network_key_suite());
