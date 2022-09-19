@@ -229,7 +229,7 @@ mod tests {
 	use super::{Entry, EntryHistory};
 	use rand::{OsRng, Rng};
 	use serde_json;
-	use unix_timestamp;
+	use crate::unix_timestamp;
 
 	fn random_entry_history<T: Rng>(rng: &mut T, time: Option<u64>) -> EntryHistory {
 		EntryHistory {

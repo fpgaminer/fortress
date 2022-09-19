@@ -5,6 +5,7 @@ version = "1.0.1"
 license = "MIT/Apache-2.0"
 repository = "https://github.com/fpgaminer/fortress"
 description = "Fortress library"
+edition = "2018"
 
 [dependencies]
 byteorder = "1.0"

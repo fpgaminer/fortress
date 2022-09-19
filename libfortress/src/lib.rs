@@ -40,10 +40,10 @@ mod database_object;
 mod database_object_map;
 pub mod sync_parameters;
 
-pub use database_object::{Directory, Entry, EntryHistory};
+pub use crate::database_object::{Directory, Entry, EntryHistory};
 
-use database_object::DatabaseObject;
-use database_object_map::DatabaseObjectMap;
+use crate::database_object::DatabaseObject;
+use crate::database_object_map::DatabaseObjectMap;
 use fortresscrypto::{CryptoError, EncryptedObject, EncryptionParameters, FileKeySuite, LoginId, LoginKey, SIV};
 use rand::{OsRng, Rng};
 use reqwest::{IntoUrl, Url};
@@ -54,7 +54,7 @@ use std::{
 	path::Path,
 	str,
 };
-use sync_parameters::SyncParameters;
+use crate::sync_parameters::SyncParameters;
 use tempfile::NamedTempFile;
 
 
