@@ -4,7 +4,6 @@ use libfortress::{Database, Entry, EntryHistory};
 use std::collections::HashMap;
 
 
-// TODO: Test bootstrap
 #[test]
 fn sync_integration_test() {
 	// Start testing server
@@ -131,4 +130,12 @@ fn sync_integration_test() {
 	// Everything should be synced now
 	parallel_db.sync(&sync_url);
 	assert_eq!(parallel_db, db);
+
+	// Now test bootstrapping from nothing but username and password
+	let mut bootstrap_db = Database::new_with_password("username", "foobar");
+	bootstrap_db.do_not_set_testing = true;
+
+	bootstrap_db.sync(&sync_url);
+	// We compare the serialized forms, because things like the FileKeySuite won't be equal
+	assert_eq!(serde_json::to_string(&bootstrap_db).unwrap(), serde_json::to_string(&db).unwrap());
 }
