@@ -2,7 +2,7 @@ use fortresscrypto::{LoginId, LoginKey, NetworkKeySuite};
 use serde::{Deserialize, Serialize};
 
 
-// Encapsulate username, MasterKey, and all cached derivative data
+// Encapsulate username, NetworkKeySuite, and all cached derivative data
 // to enforce invariants on them.
 #[derive(Serialize, Eq, PartialEq, Debug, Clone)]
 pub struct SyncParameters {

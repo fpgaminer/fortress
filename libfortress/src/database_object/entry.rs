@@ -96,9 +96,9 @@ impl Entry {
 		}
 	}
 
-	// Attempts to merge self and other and return a new Entry.
-	// Right now we don't handle any conflicts.  Either self or other must be strictly younger than the other.
-	// Returns None if the merge failed.
+	/// Attempts to merge self and other and return a new Entry.
+	/// Right now we don't handle any conflicts.  Either self or other must be strictly younger than the other.
+	/// Returns None if the merge failed.
 	pub fn merge(&self, other: &Entry) -> Option<Entry> {
 		if self.id != other.id {
 			return None;
@@ -120,8 +120,8 @@ impl Entry {
 		return Some(new_entry);
 	}
 
-	// Returns true only if it is non-destructive to replace self with other in a Database.
-	// This is true only if all of our history is contained within other.
+	/// Returns true only if it is non-destructive to replace self with other in a Database.
+	/// This is true only if all of our history is contained within other.
 	pub fn safe_to_replace_with(&self, other: &Entry) -> bool {
 		if self.id != other.id {
 			return false;
@@ -173,17 +173,15 @@ impl<'de> serde::Deserialize<'de> for Entry {
 
 #[derive(Clone, Serialize, Deserialize, Eq, PartialEq, Debug)]
 pub struct EntryHistory {
-	pub time: u64, // Unix timestamp for when this edit occured (nanoseconds)
+	/// Unix timestamp for when this edit occured (nanoseconds)
+	pub time: u64,
 	#[serde(serialize_with = "ordered_map")]
 	pub data: HashMap<String, String>,
 }
 
 impl EntryHistory {
 	pub fn new(data: HashMap<String, String>) -> EntryHistory {
-		EntryHistory {
-			time: unix_timestamp(),
-			data: data,
-		}
+		EntryHistory { time: unix_timestamp(), data }
 	}
 
 	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&String>
@@ -223,28 +221,24 @@ where
 
 #[cfg(test)]
 mod tests {
+	use std::collections::HashMap;
+
 	use super::{Entry, EntryHistory};
-	use crate::unix_timestamp;
-	use rand::{rngs::OsRng, Rng};
+	use crate::{tests::random_uniform_string, unix_timestamp};
+	use rand::{rngs::OsRng, thread_rng, Rng};
 	use serde_json;
 
 	fn random_entry_history(time: Option<u64>) -> EntryHistory {
-		EntryHistory {
-			data: [
-				(
-					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
-					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
-				),
-				(
-					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
-					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
-				),
-			]
-			.iter()
-			.cloned()
-			.collect(),
-			time: time.unwrap_or(unix_timestamp()),
+		let mut history = EntryHistory {
+			time: time.unwrap_or_else(unix_timestamp),
+			data: HashMap::new(),
+		};
+
+		for _ in 0..thread_rng().gen_range(1..10) {
+			history.data.insert(random_uniform_string(1..256), random_uniform_string(0..256));
 		}
+
+		history
 	}
 
 	#[test]

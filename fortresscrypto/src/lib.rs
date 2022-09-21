@@ -108,10 +108,11 @@ impl NetworkKeySuite {
 #[derive(Eq, PartialEq, Debug, Clone)]
 pub struct FileKeySuite {
 	encryption_keys: SivEncryptionKeys,
+	kdf_params: FileKdfParameters,
 }
 
 impl FileKeySuite {
-	pub fn derive(password: &[u8], params: &EncryptionParameters) -> Result<FileKeySuite, CryptoError> {
+	pub fn derive(password: &[u8], params: &FileKdfParameters) -> Result<FileKeySuite, CryptoError> {
 		let mut raw_keys = [0u8; 256];
 
 		let scrypt_params = scrypt::Params::new(params.log_n, params.r, params.p).map_err(|_| CryptoError::BadScryptParameters)?;
@@ -119,6 +120,7 @@ impl FileKeySuite {
 
 		Ok(FileKeySuite {
 			encryption_keys: SivEncryptionKeys::from_slice(&raw_keys).expect("internal error"),
+			kdf_params: params.clone(),
 		})
 	}
 
@@ -139,8 +141,8 @@ impl FileKeySuite {
 }
 
 
-/// Decrypts a database stored on disk.  Returns the plaintext, EncryptionParameters that were used, and the FileKeySuite that was used.
-pub fn decrypt_from_file<R: Read>(reader: &mut R, password: &[u8]) -> Result<(Vec<u8>, EncryptionParameters, FileKeySuite), CryptoError> {
+/// Decrypts a database stored on disk.  Returns the plaintext and the FileKeySuite that was used.
+pub fn decrypt_from_file<R: Read>(reader: &mut R, password: &[u8]) -> Result<(Vec<u8>, FileKeySuite), CryptoError> {
 	// Read file
 	let mut filedata = Vec::new();
 	reader.read_to_end(&mut filedata)?;
@@ -166,14 +168,14 @@ pub fn decrypt_from_file<R: Read>(reader: &mut R, password: &[u8]) -> Result<(Ve
 	// Decrypt
 	let plaintext = file_key_suite.decrypt_object(payload)?;
 
-	Ok((plaintext, params, file_key_suite))
+	Ok((plaintext, file_key_suite))
 }
 
 
 /// Encrypts a database to disk.  Resulting file will contain a header, ciphertext, mac, and checksum.
-pub fn encrypt_to_file<W: Write>(writer: &mut W, data: &[u8], params: &EncryptionParameters, key_suite: &FileKeySuite) -> io::Result<()> {
+pub fn encrypt_to_file<W: Write>(writer: &mut W, data: &[u8], key_suite: &FileKeySuite) -> io::Result<()> {
 	let ciphertext = key_suite.encrypt_object(data);
-	let header = build_header(params);
+	let header = build_header(&key_suite.kdf_params);
 	let checksum = {
 		let mut hash = [0u8; 32];
 		let mut hasher = Sha256::new();
@@ -189,7 +191,7 @@ pub fn encrypt_to_file<W: Write>(writer: &mut W, data: &[u8], params: &Encryptio
 }
 
 
-fn build_header(params: &EncryptionParameters) -> Vec<u8> {
+fn build_header(params: &FileKdfParameters) -> Vec<u8> {
 	let mut result = Vec::new();
 
 	result.extend_from_slice(b"fortress2\0");
@@ -201,7 +203,7 @@ fn build_header(params: &EncryptionParameters) -> Vec<u8> {
 }
 
 
-fn parse_header(data: &[u8]) -> Result<(EncryptionParameters, &[u8]), CryptoError> {
+fn parse_header(data: &[u8]) -> Result<(FileKdfParameters, &[u8]), CryptoError> {
 	let mut reader = Cursor::new(data);
 
 	let mut header_string = Vec::new();
@@ -221,7 +223,7 @@ fn parse_header(data: &[u8]) -> Result<(EncryptionParameters, &[u8]), CryptoErro
 	let pos = reader.position() as usize;
 
 	Ok((
-		EncryptionParameters {
+		FileKdfParameters {
 			log_n,
 			r,
 			p,
@@ -249,8 +251,7 @@ fn hmac(key: &Key, data: &[u8]) -> CtOutput<Hmac<Sha256>> {
 
 
 #[derive(Eq, PartialEq, Debug, Clone)]
-pub struct EncryptionParameters {
-	// Parameters for deriving file_key using scrypt
+pub struct FileKdfParameters {
 	pub log_n: u8,
 	pub r: u32,
 	pub p: u32,
@@ -259,10 +260,10 @@ pub struct EncryptionParameters {
 
 // Default is N=18, r=8, p=1 (less N when in debug mode)
 // Some sites suggested r=16 for modern systems, but I didn't see measurable benefit on my development machine.
-impl Default for EncryptionParameters {
+impl Default for FileKdfParameters {
 	#[cfg(debug_assertions)]
-	fn default() -> EncryptionParameters {
-		EncryptionParameters {
+	fn default() -> FileKdfParameters {
+		FileKdfParameters {
 			log_n: 8,
 			r: 8,
 			p: 1,
@@ -270,10 +271,10 @@ impl Default for EncryptionParameters {
 		}
 	}
 	#[cfg(not(debug_assertions))]
-	fn default() -> EncryptionParameters {
+	fn default() -> FileKdfParameters {
 		let mut rng = OsRng::new().expect("OsRng failed to initialize");
 
-		EncryptionParameters {
+		FileKdfParameters {
 			log_n: 18,
 			r: 8,
 			p: 1,
@@ -351,7 +352,7 @@ mod tests {
 		let encrypted_data = {
 			let mut buffer = Vec::new();
 
-			encrypt_to_file(&mut buffer, payload, &encryption_parameters, &file_key_suite).expect("this shouldn't fail");
+			encrypt_to_file(&mut buffer, payload, &file_key_suite).expect("this shouldn't fail");
 
 			buffer
 		};
@@ -384,14 +385,12 @@ mod tests {
 			if mutation_byte == 0 {
 				assert_eq!(
 					decrypt_from_file(&mut Cursor::new(corrupted_checksum), password)
-						.map(|(pt, _, _)| pt)
+						.map(|(pt, _)| pt)
 						.map_err(|_| ()),
 					Ok(payload.to_vec())
 				);
 				assert_eq!(
-					decrypt_from_file(&mut Cursor::new(corrupted_mac), password)
-						.map(|(pt, _, _)| pt)
-						.map_err(|_| ()),
+					decrypt_from_file(&mut Cursor::new(corrupted_mac), password).map(|(pt, _)| pt).map_err(|_| ()),
 					Ok(payload.to_vec())
 				);
 			} else {

@@ -1,9 +1,7 @@
 // A simplified in-memory Fortress server used for sync tests
 use data_encoding::HEXLOWER_PERMISSIVE;
-use fortresscrypto::MacTag;
+use fortresscrypto::SIV;
 use libfortress::ID;
-use serde::Deserialize;
-use serde_json::json;
 use std::{collections::HashMap, thread};
 use tiny_http::{Method, Response, Server};
 
@@ -14,86 +12,55 @@ pub fn server() -> String {
 	let server = Server::http("127.0.0.1:0").unwrap();
 	let addr = server.server_addr().to_string();
 
-	let api = |url: &str, json: JsonRequest, db: &mut HashMap<ID, (Vec<u8>, MacTag)>| match url {
-		"/update_object" => {
-			db.insert(
-				json.object_id.unwrap(),
-				(HEXLOWER_PERMISSIVE.decode(json.data.unwrap().as_bytes()).unwrap(), json.data_mac.unwrap()),
-			);
-
-			json!({ "error": null })
+	let api = |method: Method, url: Vec<&str>, body: Vec<u8>, db: &mut HashMap<ID, Vec<u8>>| match (method, url.as_slice()) {
+		(Method::Get, ["objects"]) => {
+			let response: Vec<_> = db
+				.iter()
+				.map(|(id, data)| (id, HEXLOWER_PERMISSIVE.encode(data[data.len() - 32..].as_ref())))
+				.collect();
+			Response::from_string(serde_json::to_string(&response).unwrap())
 		},
-		"/diff_objects" => {
-			let mut unknown_ids = Vec::new();
-			let mut updates = Vec::new();
-
-			for object in json.objects.unwrap() {
-				match db.get(&object.id) {
-					Some(db_object) => {
-						if db_object.1 != object.mac {
-							updates.push(json!({
-								"id": object.id,
-								"data": HEXLOWER_PERMISSIVE.encode(&db_object.0),
-								"mac": db_object.1,
-							}));
-						}
-					},
-					None => unknown_ids.push(object.id.clone()),
+		(Method::Get, ["object", id]) => {
+			let id = ID::from_slice(&HEXLOWER_PERMISSIVE.decode(id.as_bytes()).unwrap()).unwrap();
+			match db.get(&id) {
+				Some(data) => Response::from_data(data.clone()),
+				None => Response::from_string("".to_string()).with_status_code(404),
+			}
+		},
+		(Method::Post, ["object", id, old_siv]) => {
+			let id = ID::from_slice(&HEXLOWER_PERMISSIVE.decode(id.as_bytes()).unwrap()).unwrap();
+			let old_siv = SIV::from_slice(&HEXLOWER_PERMISSIVE.decode(old_siv.as_bytes()).unwrap()).unwrap();
+			if let Some(data) = db.get(&id) {
+				if old_siv != SIV::from_slice(&data[data.len() - 32..]).unwrap() {
+					return Response::from_string("".to_string()).with_status_code(409);
 				}
 			}
-
-			json!({
-				"error": null,
-				"updates": updates,
-				"unknown_ids": unknown_ids,
-			})
-		},
-		"/get_object" => match db.get(&json.object_id.unwrap()) {
-			Some(object) => {
-				json!({
-					"error": null,
-					"data": HEXLOWER_PERMISSIVE.encode(&object.0),
-					"mac": object.1,
-				})
-			},
-			None => {
-				json!({
-					"error": "Unknown Object",
-				})
-			},
+			db.insert(id, body);
+			Response::from_string("".to_string())
 		},
 		_ => panic!("404"),
 	};
 
 	thread::spawn(move || {
 		for mut request in server.incoming_requests() {
-			assert_eq!(request.method(), &Method::Post);
-			let json: JsonRequest = serde_json::from_reader(request.as_reader()).unwrap();
-			let response = api(request.url(), json, &mut db);
+			let method = request.method().clone();
+			let url = request.url().to_owned();
+			let url = url.split('/').skip(1).collect::<Vec<_>>();
+			let mut body = Vec::new();
+			request.as_reader().read_to_end(&mut body).unwrap();
 
-			request.respond(Response::from_string(response.to_string())).unwrap()
+			// Make sure auth header is present and the right format
+			let auth = request.headers().iter().find(|h| h.field.equiv("Authorization")).unwrap().value.to_string();
+			let auth = auth.split(' ').skip(1).next().unwrap();
+			let auth = HEXLOWER_PERMISSIVE.decode(auth.as_bytes()).unwrap();
+			if auth.len() != 64 {
+				request.respond(Response::from_string("".to_string()).with_status_code(401)).unwrap();
+				continue;
+			}
+
+			request.respond(api(method, url, body, &mut db)).unwrap();
 		}
 	});
 
 	"http://".to_string() + &addr
-}
-
-
-// Handles all possible requests
-#[derive(Deserialize)]
-struct JsonRequest {
-	#[serde(rename = "user_id")]
-	_user_id: ID, // Must be provided for API calls, but is not checked for tests.
-	#[serde(rename = "user_key")]
-	_user_key: ID, // Must be provided for API calls, but is not checked for tests.
-	object_id: Option<ID>,
-	data: Option<String>,
-	data_mac: Option<MacTag>,
-	objects: Option<Vec<JsonRequestObject>>,
-}
-
-#[derive(Deserialize)]
-struct JsonRequestObject {
-	id: ID,
-	mac: MacTag,
 }

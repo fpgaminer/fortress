@@ -52,8 +52,8 @@ impl DatabaseObjectMap {
 		self.inner.len()
 	}
 
-	// Update an object in the map (or insert if it didn't already exist)
-	// NOTE: Does not allow you to overwrite an existing object if that operation would be destructive (e.g. older version, conflicting history, etc).
+	/// Update an object in the map (or insert if it didn't already exist)
+	/// NOTE: Does not allow you to overwrite an existing object if that operation would be destructive (e.g. older version, conflicting history, etc).
 	pub fn update(&mut self, object: DatabaseObject) {
 		match (self.inner.get(object.get_id()), &object) {
 			(Some(&DatabaseObject::Entry(ref existing)), &DatabaseObject::Entry(ref new_object)) => {
@@ -110,6 +110,10 @@ impl<'a> IntoIterator for &'a DatabaseObjectMap {
 
 #[cfg(test)]
 mod tests {
+	use rand::{rngs::OsRng, Rng};
+
+	use crate::Directory;
+
 	use super::{
 		super::{DatabaseObject, Entry, EntryHistory},
 		DatabaseObjectMap,
@@ -117,7 +121,7 @@ mod tests {
 
 	#[test]
 	#[should_panic]
-	fn cannot_overwrite_with_older_object() {
+	fn cannot_overwrite_with_older_entry() {
 		let mut object_map = DatabaseObjectMap::new();
 
 		let mut entry = Entry::new();
@@ -126,11 +130,31 @@ mod tests {
 			[("title".to_string(), "Panic at the HashMap".to_string())].iter().cloned().collect(),
 		));
 
-		object_map.update(DatabaseObject::Entry(entry.clone()));
+		object_map.update(DatabaseObject::Entry(entry));
 
 		// TODO: It would be nice to not use [should_panic] on this whole test function
 		// and rather just indicate that this particular statement should panic.
 		// I was not able to find a nice way to do that yet.
-		object_map.update(DatabaseObject::Entry(old_entry.clone()));
+		object_map.update(DatabaseObject::Entry(old_entry));
 	}
+
+	#[test]
+	#[should_panic]
+	fn cannot_overwrite_with_older_directory() {
+		let mut object_map = DatabaseObjectMap::new();
+
+		let mut directory = Directory::new();
+		let old_directory = directory.clone();
+		directory.add(OsRng.gen());
+
+		object_map.update(DatabaseObject::Directory(directory));
+		object_map.update(DatabaseObject::Directory(old_directory));
+	}
+
+	// TODO
+	/*#[test]
+	#[should_panic]
+	fn cannot_overwrite_with_different_type() {
+		let mut object_map = DatabaseObjectMap::new();
+	}*/
 }

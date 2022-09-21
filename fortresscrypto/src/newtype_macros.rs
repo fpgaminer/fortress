@@ -62,6 +62,11 @@ macro_rules! newtype_from_slice (($newtype:ident, $len:expr) => (
 		}
 		n
 	}
+
+    pub fn to_hex(&self) -> String {
+        use ::data_encoding::HEXLOWER_PERMISSIVE;
+        HEXLOWER_PERMISSIVE.encode(&self[..])
+    }
 ));
 
 macro_rules! newtype_traits (($newtype:ident, $len:expr) => (

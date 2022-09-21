@@ -1,11 +1,13 @@
+use crate::ROOT_DIRECTORY_ID;
+
 use super::super::{unix_timestamp, Database, ID};
 use rand::{rngs::OsRng, Rng};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 
-// A directory is a list of references to Entries and Directories, much like a filesystem directory.
-// History is always ordered (by timestamp) and consistent (no double adds or removes of non-existant IDs).
+/// A directory is a list of references to Entries and Directories, much like a filesystem directory.
+/// History is always ordered (by timestamp) and consistent (no double adds or removes of non-existant IDs).
 #[derive(Serialize, Eq, PartialEq, Debug, Clone)]
 pub struct Directory {
 	id: ID,
@@ -24,9 +26,17 @@ impl Directory {
 		}
 	}
 
-	// Returns None if history is invalid
+	pub fn new_root() -> Directory {
+		Directory {
+			id: ROOT_DIRECTORY_ID,
+			entries: HashSet::new(),
+			history: Vec::new(),
+		}
+	}
+
+	/// Reconstructs state from history.
+	/// Returns None if history is invalid.
 	fn from_history(id: ID, history: Vec<DirectoryHistory>) -> Option<Directory> {
-		// Re-construct state from history
 		let mut entries = HashSet::new();
 		let mut min_next_timestamp = 0;
 
@@ -51,11 +61,7 @@ impl Directory {
 			};
 		}
 
-		Some(Directory {
-			id: id,
-			entries: entries,
-			history: history,
-		})
+		Some(Directory { id, entries, history })
 	}
 
 	pub fn get_id(&self) -> &ID {
@@ -72,7 +78,7 @@ impl Directory {
 
 	pub fn add_with_time(&mut self, id: ID, time: u64) {
 		if !self.entries.insert(id) {
-			panic!("Attempt to add an ID to directory that already exists.");
+			panic!("Cannot add duplicate ID to directory.");
 		}
 
 		if let Some(last) = self.history.last() {
@@ -82,9 +88,9 @@ impl Directory {
 		}
 
 		self.history.push(DirectoryHistory {
-			id: id,
+			id,
 			action: DirectoryHistoryAction::Add,
-			time: time,
+			time,
 		});
 	}
 
@@ -94,7 +100,7 @@ impl Directory {
 
 	pub fn remove_with_time(&mut self, id: ID, time: u64) {
 		if !self.entries.remove(&id) {
-			panic!("Attempt to remove an ID from directory that doesn't exist");
+			panic!("Cannot remove non-existant ID from directory.");
 		}
 
 		if let Some(last) = self.history.last() {
@@ -104,19 +110,19 @@ impl Directory {
 		}
 
 		self.history.push(DirectoryHistory {
-			id: id,
+			id,
 			action: DirectoryHistoryAction::Remove,
-			time: time,
+			time,
 		});
 	}
 
-	// List all Entry entries in this directory
+	/// List all Entry entries in this directory.
 	pub fn list_entries<'a>(&'a self, database: &Database) -> Vec<&'a ID> {
 		self.entries.iter().filter(|id| database.get_entry_by_id(id).is_some()).collect()
 	}
 
-	// Merge self and other, returning a new Directory
-	// Returns None if there is a conflict.
+	/// Merge self and other, returning a new Directory.
+	/// Returns None if there is a conflict.
 	pub fn merge(&self, other: &Directory) -> Option<Directory> {
 		if self.id != other.id {
 			return None;
@@ -137,8 +143,8 @@ impl Directory {
 		Directory::from_history(self.id, merged_history)
 	}
 
-	// Returns true only if it is safe to replace self with other in the Database.
-	// This is only true if doing so is a non-destructive operation (i.e. history is perserved).
+	/// Returns true only if it is safe to replace self with other in the Database.
+	/// This is only true if doing so is a non-destructive operation (i.e. history is perserved).
 	pub fn safe_to_replace_with(&self, other: &Directory) -> bool {
 		if self.id != other.id {
 			return false;
@@ -179,7 +185,8 @@ impl<'de> serde::Deserialize<'de> for Directory {
 pub struct DirectoryHistory {
 	pub id: ID,
 	pub action: DirectoryHistoryAction,
-	pub time: u64, // Unix timestamp for when this edit occured (nanoseconds)
+	/// Unix timestamp for when this edit occurred (in nanoseconds).
+	pub time: u64,
 }
 
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone)]
