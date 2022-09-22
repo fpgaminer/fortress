@@ -100,22 +100,22 @@ fn sync_integration_test() {
 	// Sync db
 	let db_before_sync = db.clone();
 
-	db.sync(&sync_url);
+	db.sync(&sync_url).unwrap();
 
 	// Syncing right now shouldn't change anything
-	db.sync(&sync_url);
+	db.sync(&sync_url).unwrap();
 	assert_eq!(db, db_before_sync);
 
 	// Syncing the older database should bring it up to speed
-	db_old.sync(&sync_url);
+	db_old.sync(&sync_url).unwrap();
 	assert_eq!(db_old, db);
 
 	// But still shouldn't affect db
-	db.sync(&sync_url);
+	db.sync(&sync_url).unwrap();
 	assert_eq!(db, db_before_sync);
 
 	// Syncing parallel_db should pick up db's edits
-	parallel_db.sync(&sync_url);
+	parallel_db.sync(&sync_url).unwrap();
 	assert_eq!(
 		parallel_db.get_entry_by_id(entry3.get_id()).unwrap(),
 		db.get_entry_by_id(entry3.get_id()).unwrap()
@@ -123,19 +123,22 @@ fn sync_integration_test() {
 	assert_ne!(parallel_db, db);
 
 	// Now syncing db should pick up parallel db's edits
-	db.sync(&sync_url);
+	db.sync(&sync_url).unwrap();
 	assert_eq!(parallel_db, db);
 	assert_ne!(db, db_old);
 
 	// Everything should be synced now
-	parallel_db.sync(&sync_url);
+	parallel_db.sync(&sync_url).unwrap();
 	assert_eq!(parallel_db, db);
 
 	// Now test bootstrapping from nothing but username and password
 	let mut bootstrap_db = Database::new_with_password("username", "foobar");
 	bootstrap_db.do_not_set_testing = true;
 
-	bootstrap_db.sync(&sync_url);
+	bootstrap_db.sync(&sync_url).unwrap();
 	// We compare the serialized forms, because things like the FileKeySuite won't be equal
 	assert_eq!(serde_json::to_string(&bootstrap_db).unwrap(), serde_json::to_string(&db).unwrap());
 }
+
+
+// TODO: Test password change (not fully implemented yet, so can't test yet)

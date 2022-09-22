@@ -26,12 +26,14 @@
 mod newtype_macros;
 mod database_object;
 mod database_object_map;
+mod errors;
 pub mod sync_parameters;
 
 pub use crate::database_object::{Directory, Entry, EntryHistory};
 
 use crate::{database_object::DatabaseObject, database_object_map::DatabaseObjectMap, sync_parameters::SyncParameters};
-use fortresscrypto::{CryptoError, EncryptedObject, FileKeySuite, LoginId, LoginKey, SIV};
+pub use errors::FortressError;
+use fortresscrypto::{EncryptedObject, FileKeySuite, LoginId, LoginKey, SIV};
 use rand::{rngs::OsRng, seq::SliceRandom, Rng};
 use reqwest::{IntoUrl, Method, Url};
 use serde::{Deserialize, Serialize};
@@ -72,7 +74,7 @@ impl Database {
 		let password = password.as_ref();
 
 		let encryption_parameters = Default::default();
-		let file_key_suite = FileKeySuite::derive(password.as_bytes(), &encryption_parameters).unwrap(); // TODO: Don't unwrap
+		let file_key_suite = FileKeySuite::derive(password.as_bytes(), &encryption_parameters).expect("Internal error: Scrypt parameters were invalid.");
 
 		// TODO: Derive in a background thread
 		let sync_parameters = SyncParameters::new(username, password);
@@ -94,7 +96,7 @@ impl Database {
 		let password = password.as_ref();
 
 		let encryption_parameters = Default::default();
-		self.file_key_suite = FileKeySuite::derive(password.as_bytes(), &encryption_parameters).unwrap(); // TODO: Don't unwrap
+		self.file_key_suite = FileKeySuite::derive(password.as_bytes(), &encryption_parameters).expect("Internal error: Scrypt parameters were invalid.");
 
 		// TODO: Derive in a background thread
 		self.sync_parameters = SyncParameters::new(username, password);
@@ -108,14 +110,14 @@ impl Database {
 	}
 
 	pub fn get_root(&self) -> &Directory {
-		match self.objects.get(&ROOT_DIRECTORY_ID).unwrap() {
+		match self.objects.get(&ROOT_DIRECTORY_ID).expect("internal error") {
 			&DatabaseObject::Directory(ref dir) => dir,
 			_ => panic!(),
 		}
 	}
 
 	pub fn get_root_mut(&mut self) -> &mut Directory {
-		match self.objects.get_mut(&ROOT_DIRECTORY_ID).unwrap() {
+		match self.objects.get_mut(&ROOT_DIRECTORY_ID).expect("internal error") {
 			&mut DatabaseObject::Directory(ref mut dir) => dir,
 			_ => panic!(),
 		}
@@ -145,7 +147,7 @@ impl Database {
 		}
 	}
 
-	pub fn save_to_path<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
+	pub fn save_to_path<P: AsRef<Path>>(&self, path: P) -> Result<(), FortressError> {
 		// Create a temporary file to write to
 		let mut temp_file = {
 			let parent_directory = path.as_ref().parent().ok_or(io::Error::new(io::ErrorKind::NotFound, "Bad path"))?;
@@ -162,10 +164,10 @@ impl Database {
 		// Moving a temporary file is atomic (at least on *nix), so doing it this way
 		// instead of writing directly to the destination file helps prevent data loss.
 		let temp_path = temp_file.into_temp_path();
-		temp_path.persist(path).map_err(|e| e.error)
+		temp_path.persist(path).map_err(|e| e.error).map_err(FortressError::from)
 	}
 
-	pub fn load_from_path<P: AsRef<Path>, A: AsRef<str>>(path: P, password: A) -> Result<Database, CryptoError> {
+	pub fn load_from_path<P: AsRef<Path>, A: AsRef<str>>(path: P, password: A) -> Result<Database, FortressError> {
 		let password = password.as_ref();
 
 		// This struct is needed because Database has fields that aren't part of
@@ -185,7 +187,7 @@ impl Database {
 		};
 
 		// Deserialize
-		let db: SerializableDatabase = serde_json::from_slice(&plaintext).unwrap(); // TODO!!!!! Don't unwrap
+		let db: SerializableDatabase = serde_json::from_slice(&plaintext)?;
 
 		// Keep encryption keys for quicker saving later
 		Ok(Database {
@@ -200,17 +202,16 @@ impl Database {
 	// TODO: Sync should be performed in a separate background thread
 	// TODO: Instead of having library users call sync themselves, we should just have an init method which sets up a continuous automatic
 	// background sync.
-	// TODO: Cleanup unwraps and add proper error handling
-	pub fn sync<U: IntoUrl>(&mut self, url: U) {
-		let mut url = url.into_url().unwrap();
+	pub fn sync<U: IntoUrl>(&mut self, url: U) -> Result<(), FortressError> {
+		let mut url = url.into_url().map_err(|_| FortressError::SyncBadUrl)?;
 		if self.do_not_set_testing == false {
-			url.set_scheme("https").unwrap(); // Force SSL
+			url.set_scheme("https").map_err(|_| FortressError::SyncBadUrl)?;
 		}
 		let client = reqwest::blocking::Client::new();
 
 		loop {
 			// Get list of objects from server
-			let server_objects = self.sync_api_list_objects(&client, &url).unwrap().into_iter().collect::<HashMap<_, _>>();
+			let server_objects = self.sync_api_list_objects(&client, &url)?.into_iter().collect::<HashMap<_, _>>();
 			let mut loop_again = false;
 
 			// Download any objects that we're missing or that differ
@@ -220,15 +221,17 @@ impl Database {
 
 					if encrypted_object.siv != *server_siv {
 						// Object is different, download it and merge
-						let server_object = self.sync_api_get_object(&client, &url, server_id).unwrap().unwrap();
+						let server_object = self
+							.sync_api_get_object(&client, &url, server_id)?
+							.ok_or(FortressError::SyncInconsistentServer)?;
 
 						let new_object = match (local_object, server_object) {
 							(DatabaseObject::Directory(local_directory), DatabaseObject::Directory(server_directory)) => {
-								let new_directory = local_directory.merge(&server_directory).unwrap();
+								let new_directory = local_directory.merge(&server_directory).ok_or(FortressError::SyncConflict)?;
 								DatabaseObject::Directory(new_directory)
 							},
 							(DatabaseObject::Entry(local_entry), DatabaseObject::Entry(server_entry)) => {
-								let new_entry = local_entry.merge(&server_entry).unwrap();
+								let new_entry = local_entry.merge(&server_entry).ok_or(FortressError::SyncConflict)?;
 								DatabaseObject::Entry(new_entry)
 							},
 							_ => panic!("Object type mismatch, this should never happen"),
@@ -237,7 +240,9 @@ impl Database {
 						self.objects.update(new_object);
 					}
 				} else {
-					let object = self.sync_api_get_object(&client, &url, &server_id).unwrap().unwrap();
+					let object = self
+						.sync_api_get_object(&client, &url, &server_id)?
+						.ok_or(FortressError::SyncInconsistentServer)?;
 					self.objects.update(object);
 				}
 			}
@@ -250,12 +255,12 @@ impl Database {
 				if let Some(server_siv) = server_objects.get(local_id) {
 					if encrypted_object.siv != *server_siv {
 						// Object is different, upload it
-						self.sync_api_update_object(&client, &url, &local_object, server_siv).unwrap();
+						self.sync_api_update_object(&client, &url, &local_object, server_siv)?;
 						loop_again = true;
 					}
 				} else {
 					// Object is missing from server, upload it
-					self.sync_api_update_object(&client, &url, &local_object, &SIV([0; 32])).unwrap();
+					self.sync_api_update_object(&client, &url, &local_object, &SIV([0; 32]))?;
 				}
 			}
 
@@ -263,6 +268,8 @@ impl Database {
 				break;
 			}
 		}
+
+		Ok(())
 	}
 
 	/// List all objects on the server
@@ -302,7 +309,7 @@ impl Database {
 
 	/// Fetch an object from the server.
 	/// If the object doesn't exist on the server or could not be decrypted then None is returned.
-	fn sync_api_get_object(&self, client: &reqwest::blocking::Client, url: &Url, id: &ID) -> Result<Option<DatabaseObject>, ApiError> {
+	fn sync_api_get_object(&self, client: &reqwest::blocking::Client, url: &Url, id: &ID) -> Result<Option<DatabaseObject>, FortressError> {
 		let url = url.join(&format!("/object/{}", id.to_hex())).expect("internal error");
 
 		let response = api_request(
@@ -313,7 +320,8 @@ impl Database {
 			url,
 			"",
 		)?
-		.bytes()?;
+		.bytes()
+		.map_err(ApiError::from)?;
 
 		if response.len() < 32 {
 			println!("WARNING: Server returned invalid response for object");
@@ -328,7 +336,7 @@ impl Database {
 		};
 
 		match self.sync_parameters.get_network_key_suite().decrypt_object(&id[..], &encrypted_object) {
-			Ok(plaintext) => Ok(Some(serde_json::from_slice(&plaintext).unwrap())),
+			Ok(plaintext) => Ok(Some(serde_json::from_slice(&plaintext)?)),
 			Err(err) => {
 				println!("WARNING: Error while decrypting server object(ID: {:?}): {}", id, err);
 				Ok(None)
@@ -337,14 +345,14 @@ impl Database {
 	}
 
 	fn encrypt_object(&self, object: &DatabaseObject) -> EncryptedObject {
-		let payload = serde_json::to_vec(&object).unwrap();
+		let payload = serde_json::to_vec(&object).expect("internal error");
 		self.sync_parameters.get_network_key_suite().encrypt_object(&object.get_id()[..], &payload)
 	}
 }
 
 
 #[derive(Debug)]
-enum ApiError {
+pub enum ApiError {
 	ReqwestError(reqwest::Error),
 	ApiError(String),
 }
@@ -352,6 +360,15 @@ enum ApiError {
 impl From<reqwest::Error> for ApiError {
 	fn from(err: reqwest::Error) -> ApiError {
 		ApiError::ReqwestError(err)
+	}
+}
+
+impl std::fmt::Display for ApiError {
+	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+		match self {
+			ApiError::ReqwestError(err) => write!(f, "Reqwest error: {}", err),
+			ApiError::ApiError(err) => write!(f, "API error: {}", err),
+		}
 	}
 }
 
@@ -410,7 +427,7 @@ pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: b
 	let mut result = String::new();
 
 	for _ in 0..length {
-		result.push(alphabet.choose(&mut OsRng).unwrap().clone());
+		result.push(alphabet.choose(&mut OsRng).expect("internal error").clone());
 	}
 
 	result
@@ -421,13 +438,13 @@ pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: b
 // Our library won't handle time before the unix epoch, so we return u64.
 // NOTE: This will panic if used past ~2500 C.E. (Y2K taught me nothing).
 fn unix_timestamp() -> u64 {
-	let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap();
+	let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).expect("internal error");
 	timestamp
 		.as_secs()
 		.checked_mul(1000000000)
-		.unwrap()
+		.expect("internal error")
 		.checked_add(timestamp.subsec_nanos() as u64)
-		.unwrap()
+		.expect("internal error")
 }
 
 
