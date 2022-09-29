@@ -1,10 +1,5 @@
 use super::{database_object::DatabaseObject, ID};
-use std::{
-	self,
-	borrow::Borrow,
-	collections::{BTreeMap, HashMap},
-	hash::Hash,
-};
+use std::{self, borrow::Borrow, collections::HashMap, hash::Hash};
 
 
 // We wrap HashMap to enforce some invariants.
@@ -82,7 +77,10 @@ impl serde::Serialize for DatabaseObjectMap {
 		S: serde::Serializer,
 	{
 		// Deterministic serialization of the hashmap by ordering keys
-		let ordered: BTreeMap<_, _> = self.inner.iter().collect();
+		// Also, we serialize to a Vec since we already have the IDs in the objects themselves
+		let mut ordered = self.inner.values().collect::<Vec<_>>();
+		ordered.sort_unstable_by(|a, b| a.get_id().cmp(b.get_id()));
+
 		ordered.serialize(serializer)
 	}
 }
@@ -93,7 +91,10 @@ impl<'de> serde::Deserialize<'de> for DatabaseObjectMap {
 		D: serde::Deserializer<'de>,
 	{
 		Ok(DatabaseObjectMap {
-			inner: HashMap::deserialize(deserializer)?,
+			inner: Vec::deserialize(deserializer)?
+				.into_iter()
+				.map(|object: DatabaseObject| (object.get_id().clone(), object))
+				.collect(),
 		})
 	}
 }

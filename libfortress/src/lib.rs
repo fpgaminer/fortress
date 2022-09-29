@@ -33,6 +33,7 @@ pub use crate::database_object::{Directory, Entry, EntryHistory};
 
 use crate::{database_object::DatabaseObject, database_object_map::DatabaseObjectMap, sync_parameters::SyncParameters};
 pub use errors::FortressError;
+pub use fortresscrypto;
 use fortresscrypto::{EncryptedObject, FileKeySuite, LoginId, LoginKey, SIV};
 use rand::{rngs::OsRng, seq::SliceRandom, Rng};
 use reqwest::{IntoUrl, Method, Url};
@@ -778,20 +779,18 @@ mod tests {
 
 			match title.map(|t| t.as_str()) {
 				Some("Forgot this one") => {
-					assert_eq!(entry.get_history().len(), 2);
-					assert_eq!(entry.get_history()[0].data.len(), 0);
+					assert_eq!(entry.get_history().len(), 1);
 				},
 				Some("Test test") => {
 					assert_eq!(entry.get("username").unwrap(), "Username");
-					assert_eq!(entry.get_history().len(), 2);
+					assert_eq!(entry.get_history().len(), 1);
 				},
 				Some("Ooops") => {
 					assert_eq!(entry["username"], "Username");
 					assert_eq!(entry.get_state()["password"], "Password");
-					assert_eq!(entry.get_history()[0].data.len(), 0);
-					assert_eq!(entry.get_history()[1].data["username"], "Username");
-					assert_eq!(entry.get_history()[2].data.get("username"), None);
-					assert_eq!(entry.get_history()[1]["title"], "Test test");
+					assert_eq!(entry.get_history()[0].data["username"], "Username");
+					assert_eq!(entry.get_history()[1].data.get("username"), None);
+					assert_eq!(entry.get_history()[0]["title"], "Test test");
 				},
 				_ => {
 					panic!("Unknown title");

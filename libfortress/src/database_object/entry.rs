@@ -85,8 +85,10 @@ impl Entry {
 		// Remove any fields from the EntryHistory if they don't actually cause any changes to our state
 		new_data.data.retain(|k, v| self.state.get(k) != Some(v));
 
-		self.apply_history(&new_data);
-		self.history.push(new_data);
+		if !new_data.data.is_empty() {
+			self.apply_history(&new_data);
+			self.history.push(new_data);
+		}
 	}
 
 	// Used internally to apply an EntryHistory on top of this object's current state.
