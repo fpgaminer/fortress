@@ -229,11 +229,13 @@ fn parse_header(data: &[u8]) -> Result<(FileKdfParameters, &[u8]), CryptoError> 
 
 /// Calculates the SHA-512-256 hash of the given inputs (SHA-512 output is truncated to 32 bytes).
 fn calculate_checksum(inputs: impl IntoIterator<Item = impl AsRef<[u8]>>) -> [u8; 32] {
+	use sha2::digest::generic_array::{sequence::Split, typenum::U32, GenericArray};
+
 	let mut hasher = Sha512::new();
 	for input in inputs {
 		hasher.update(input);
 	}
-	let (first32, _): (generic_array::GenericArray<u8, generic_array::typenum::U32>, _) = generic_array::sequence::Split::split(hasher.finalize());
+	let (first32, _): (GenericArray<u8, U32>, _) = Split::split(hasher.finalize());
 	first32.into()
 }
 
@@ -269,7 +271,7 @@ impl Default for FileKdfParameters {
 
 #[cfg(test)]
 mod tests {
-	use super::{decrypt_from_file, encrypt_to_file, calculate_checksum, FileKeySuite, NetworkKeySuite};
+	use super::{calculate_checksum, decrypt_from_file, encrypt_to_file, FileKeySuite, NetworkKeySuite};
 	use rand::{rngs::OsRng, seq::SliceRandom, Rng};
 	use std::io::Cursor;
 

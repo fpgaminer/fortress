@@ -362,7 +362,6 @@ dependencies = [
  "byteorder",
  "chacha20",
  "data-encoding",
- "generic-array",
  "hmac",
  "password-hash",
  "rand",
