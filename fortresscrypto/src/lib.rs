@@ -8,7 +8,7 @@ pub use error::CryptoError;
 use hmac::{digest::CtOutput, Hmac, Mac};
 use rand::{rngs::OsRng, Rng};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use sha2::{Digest, Sha512};
 use siv::SivEncryptionKeys;
 pub use siv::SIV;
 use std::{
@@ -56,7 +56,7 @@ const LOGIN_USERNAME_SALT: Key = Key([
 
 
 pub fn hash_username_for_login(username: &[u8]) -> LoginId {
-	LoginId::from_slice(&hmac(&LOGIN_USERNAME_SALT, username).into_bytes()).expect("internal error")
+	LoginId::from_slice(&hmac_512(&LOGIN_USERNAME_SALT, username).into_bytes()[..32]).expect("internal error")
 }
 
 
@@ -77,7 +77,7 @@ impl NetworkKeySuite {
 	/// This function call will take a long time to finish (5 minutes or more).
 	pub fn derive(username: &[u8], password: &[u8]) -> NetworkKeySuite {
 		// Hide username behind hmac so salt is unique to this application.
-		let salt = hmac(&NETWORK_USERNAME_SALT, username).into_bytes();
+		let salt = &hmac_512(&NETWORK_USERNAME_SALT, username).into_bytes()[..32];
 		let mut raw_keys = [0u8; 256 + 32];
 		let scrypt_params = scrypt::Params::new(NETWORK_SCRYPT_LOG_N, NETWORK_SCRYPT_R, NETWORK_SCRYPT_P).expect("scrypt parameters should be valid");
 		scrypt::scrypt(password, &salt, &scrypt_params, &mut raw_keys).expect("internal error");
@@ -153,7 +153,7 @@ pub fn decrypt_from_file<R: Read>(reader: &mut R, password: &[u8]) -> Result<(Ve
 	}
 
 	let (filedata, checksum) = filedata.split_at(filedata.len() - 32);
-	let calculated_checksum = sha256(filedata);
+	let calculated_checksum = calculate_checksum([filedata]);
 
 	if calculated_checksum != checksum {
 		return Err(CryptoError::BadChecksum);
@@ -176,14 +176,7 @@ pub fn decrypt_from_file<R: Read>(reader: &mut R, password: &[u8]) -> Result<(Ve
 pub fn encrypt_to_file<W: Write>(writer: &mut W, data: &[u8], key_suite: &FileKeySuite) -> io::Result<()> {
 	let ciphertext = key_suite.encrypt_object(data);
 	let header = build_header(&key_suite.kdf_params);
-	let checksum = {
-		let mut hash = [0u8; 32];
-		let mut hasher = Sha256::new();
-		hasher.update(&header);
-		hasher.update(&ciphertext);
-		hasher.finalize_into((&mut hash).into());
-		hash
-	};
+	let checksum = calculate_checksum([header.as_slice(), ciphertext.as_slice()]);
 
 	writer.write_all(&header)?;
 	writer.write_all(&ciphertext)?;
@@ -234,17 +227,19 @@ fn parse_header(data: &[u8]) -> Result<(FileKdfParameters, &[u8]), CryptoError> 
 }
 
 
-fn sha256(input: &[u8]) -> [u8; 32] {
-	let mut hash = [0u8; 32];
-	let mut hasher = Sha256::new();
-	hasher.update(input);
-	hasher.finalize_into((&mut hash).into());
-	hash
+/// Calculates the SHA-512-256 hash of the given inputs (SHA-512 output is truncated to 32 bytes).
+fn calculate_checksum(inputs: impl IntoIterator<Item = impl AsRef<[u8]>>) -> [u8; 32] {
+	let mut hasher = Sha512::new();
+	for input in inputs {
+		hasher.update(input);
+	}
+	let (first32, _): (generic_array::GenericArray<u8, generic_array::typenum::U32>, _) = generic_array::sequence::Split::split(hasher.finalize());
+	first32.into()
 }
 
 
-fn hmac(key: &Key, data: &[u8]) -> CtOutput<Hmac<Sha256>> {
-	let mut hmac = Hmac::<Sha256>::new_from_slice(&key[..]).expect("unexpected");
+fn hmac_512(key: &Key, data: &[u8]) -> CtOutput<Hmac<Sha512>> {
+	let mut hmac = Hmac::<Sha512>::new_from_slice(&key[..]).expect("unexpected");
 	hmac.update(data);
 	hmac.finalize()
 }
@@ -261,24 +256,12 @@ pub struct FileKdfParameters {
 // Default is N=18, r=8, p=1 (less N when in debug mode)
 // Some sites suggested r=16 for modern systems, but I didn't see measurable benefit on my development machine.
 impl Default for FileKdfParameters {
-	#[cfg(debug_assertions)]
 	fn default() -> FileKdfParameters {
 		FileKdfParameters {
-			log_n: 8,
+			log_n: if cfg!(debug_assertions) { 8 } else { 18 },
 			r: 8,
 			p: 1,
 			salt: OsRng.gen(),
-		}
-	}
-	#[cfg(not(debug_assertions))]
-	fn default() -> FileKdfParameters {
-		let mut rng = OsRng::new().expect("OsRng failed to initialize");
-
-		FileKdfParameters {
-			log_n: 18,
-			r: 8,
-			p: 1,
-			salt: rng.gen(),
 		}
 	}
 }
@@ -286,7 +269,7 @@ impl Default for FileKdfParameters {
 
 #[cfg(test)]
 mod tests {
-	use super::{decrypt_from_file, encrypt_to_file, sha256, FileKeySuite, NetworkKeySuite};
+	use super::{decrypt_from_file, encrypt_to_file, calculate_checksum, FileKeySuite, NetworkKeySuite};
 	use rand::{rngs::OsRng, seq::SliceRandom, Rng};
 	use std::io::Cursor;
 
@@ -374,7 +357,7 @@ mod tests {
 				// can cause the library to spin forever during tests.
 				// TODO: This isn't ideal as we'd like to test corrupting those bits too, but not sure how.
 				data[32..].choose_mut(&mut OsRng).map(|x| *x ^= mutation_byte);
-				let checksum = sha256(&data);
+				let checksum = calculate_checksum([&data]);
 				data.extend_from_slice(&checksum);
 				data
 			};
