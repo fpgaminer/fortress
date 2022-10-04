@@ -65,8 +65,6 @@ pub struct Database {
 
 	#[serde(skip_serializing, skip_deserializing)]
 	file_key_suite: FileKeySuite,
-	#[serde(skip_serializing, skip_deserializing)]
-	pub do_not_set_testing: bool, // DO NOT SET TO true; used only during integration testing.
 }
 
 impl Database {
@@ -88,7 +86,6 @@ impl Database {
 			objects,
 			sync_parameters,
 			file_key_suite,
-			do_not_set_testing: false,
 		}
 	}
 
@@ -108,6 +105,14 @@ impl Database {
 
 	pub fn get_username(&self) -> &str {
 		self.sync_parameters.get_username()
+	}
+
+	pub fn get_login_id(&self) -> &LoginId {
+		self.sync_parameters.get_login_id()
+	}
+
+	pub fn get_login_key(&self) -> &LoginKey {
+		self.sync_parameters.get_login_key()
 	}
 
 	pub fn get_root(&self) -> &Directory {
@@ -196,7 +201,6 @@ impl Database {
 			sync_parameters: db.sync_parameters,
 
 			file_key_suite,
-			do_not_set_testing: false,
 		})
 	}
 
@@ -205,7 +209,8 @@ impl Database {
 	// background sync.
 	pub fn sync<U: IntoUrl>(&mut self, url: U) -> Result<(), FortressError> {
 		let mut url = url.into_url().map_err(|_| FortressError::SyncBadUrl)?;
-		if self.do_not_set_testing == false {
+		if !cfg!(debug_assertions) {
+			// Force HTTPS (except in debug builds where we do development and testing)
 			url.set_scheme("https").map_err(|_| FortressError::SyncBadUrl)?;
 		}
 		let client = reqwest::blocking::Client::new();
@@ -222,9 +227,14 @@ impl Database {
 
 					if encrypted_object.siv != *server_siv {
 						// Object is different, download it and merge
-						let server_object = self
-							.sync_api_get_object(&client, &url, server_id)?
-							.ok_or(FortressError::SyncInconsistentServer)?;
+						let server_object = match self.sync_api_get_object(&client, &url, server_id)? {
+							Some(object) => object,
+							None => {
+								// We couldn't get the object from the server (could be a changed password).  Ignore.
+								println!("WARNING: Couldn't get object {} from server, ignoring", server_id.to_hex());
+								continue;
+							},
+						};
 
 						let new_object = match (local_object, server_object) {
 							(DatabaseObject::Directory(local_directory), DatabaseObject::Directory(server_directory)) => {
@@ -339,7 +349,7 @@ impl Database {
 		match self.sync_parameters.get_network_key_suite().decrypt_object(&id[..], &encrypted_object) {
 			Ok(plaintext) => Ok(Some(serde_json::from_slice(&plaintext)?)),
 			Err(err) => {
-				println!("WARNING: Error while decrypting server object(ID: {:?}): {}", id, err);
+				println!("WARNING: Error while decrypting server object(ID: {}): {}", id.to_hex(), err);
 				Ok(None)
 			},
 		}

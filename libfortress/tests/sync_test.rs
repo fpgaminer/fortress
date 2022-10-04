@@ -11,7 +11,6 @@ fn sync_integration_test() {
 
 	// Build database
 	let mut db = Database::new_with_password("username", "foobar");
-	db.do_not_set_testing = true;
 
 	let mut entry1 = Entry::new();
 	entry1.edit(EntryHistory::new(HashMap::new()));
@@ -133,7 +132,6 @@ fn sync_integration_test() {
 
 	// Now test bootstrapping from nothing but username and password
 	let mut bootstrap_db = Database::new_with_password("username", "foobar");
-	bootstrap_db.do_not_set_testing = true;
 
 	bootstrap_db.sync(&sync_url).unwrap();
 	// We compare the serialized forms, because things like the FileKeySuite won't be equal

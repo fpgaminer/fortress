@@ -3,9 +3,8 @@ use rand::{rngs::OsRng, Rng};
 use serde::{Deserialize, Serialize};
 use std::{
 	borrow::Borrow,
-	cmp,
 	collections::{BTreeMap, HashMap},
-	hash::Hash,
+	hash::{Hash, Hasher},
 	ops::Index,
 };
 
@@ -99,27 +98,25 @@ impl Entry {
 	}
 
 	/// Attempts to merge self and other and return a new Entry.
-	/// Right now we don't handle any conflicts.  Either self or other must be strictly younger than the other.
 	/// Returns None if the merge failed.
 	pub fn merge(&self, other: &Entry) -> Option<Entry> {
 		if self.id != other.id {
 			return None;
 		}
 
-		// Make sure there are no conflicts
-		let shared_history_len = cmp::min(self.history.len(), other.history.len());
+		// Concat histories
+		let mut merged_history = [&self.history[..], &other.history[..]].concat();
 
-		if self.history[..shared_history_len] != other.history[..shared_history_len] {
-			return None;
-		}
+		// Sort by timestamp
+		merged_history.sort_unstable_by(|a, b| a.time.cmp(&b.time));
 
-		let mut new_entry = self.clone();
+		// Remove duplicates (the same timestamp and operation)
+		merged_history.dedup();
 
-		for history in &other.history[shared_history_len..] {
-			new_entry.edit(history.clone());
-		}
-
-		return Some(new_entry);
+		// Re-build state and validate
+		// If we are unable to re-build state that means the merged history was
+		// invalid due to a conflict (two edits at the same time).
+		Entry::inner_new(self.id, merged_history, self.time_created)
 	}
 
 	/// Returns true only if it is non-destructive to replace self with other in a Database.
@@ -129,12 +126,13 @@ impl Entry {
 			return false;
 		}
 
-		if other.history.len() < self.history.len() {
-			return false;
-		}
+		let mut other_iter = other.history.iter();
 
-		if self.history[..] != other.history[..self.history.len()] {
-			return false;
+		// Sequentially search other's history for our history.
+		for item in &self.history {
+			if !other_iter.any(|other_item| other_item == item) {
+				return false;
+			}
 		}
 
 		return true;
@@ -192,6 +190,12 @@ impl EntryHistory {
 		String: Borrow<Q>,
 	{
 		self.data.get(key)
+	}
+}
+
+impl Hash for EntryHistory {
+	fn hash<H: Hasher>(&self, state: &mut H) {
+		self.time.hash(state);
 	}
 }
 
@@ -277,10 +281,10 @@ mod tests {
 		// Merge should fail on conflict
 		{
 			let mut entry1 = Entry::new();
-			entry1.edit(random_entry_history(None));
+			entry1.edit(random_entry_history(Some(1)));
 			let mut entry2 = entry1.clone();
-			entry2.edit(random_entry_history(None));
-			entry1.edit(random_entry_history(None));
+			entry2.edit(random_entry_history(Some(2)));
+			entry1.edit(random_entry_history(Some(2)));
 
 			assert!(entry1.merge(&entry2).is_none());
 			assert!(!entry1.safe_to_replace_with(&entry2));
