@@ -4,14 +4,63 @@ on:
   push: { branches: master }
 
 jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - run: apt-get update && apt-get install -y libssl-dev lib-gtk-4-dev
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - users: actions-rs/cargo@v1
+        with:
+          command: check
+  
   test:
     name: Run test suite
     runs-on: ubuntu-latest
-    container: rust:latest
-
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v3
-    
-    - name: Run tests
-      run: cargo test
+      - run: apt-get update && apt-get install -y libssl-dev lib-gtk-4-dev
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: test
+  
+  fmt:
+    name: Check formatting
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+  
+  clippy:
+    name: Check for linting errors
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - run: rustup component add clippy
+      - uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: -- -D warnings
