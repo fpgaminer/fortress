@@ -52,8 +52,9 @@ jobs:
   
   clippy:
     name: Check for linting errors
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
+      - run: sudo apt-get update && sudo apt-get install -y libssl-dev libgtk-4-dev
       - uses: actions/checkout@v3
       - uses: actions-rs/toolchain@v1
         with:
