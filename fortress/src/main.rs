@@ -6,7 +6,7 @@ mod menu;
 mod open_database;
 mod view_database;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use create_database::CreateDatabaseModel;
 use dialog_modal::{DialogConfig, DialogModel, DialogMsg};
 use entry_editor::{EntryEditorModel, EntryEditorMsg};
@@ -31,37 +31,54 @@ use std::{
 use view_database::ViewDatabaseModel;
 
 
-// TODO: Better handling of the --encrypt and --decrypt flags; they should be mutually exclusive; --decrypt should take file as an argument; --password should be safely read from stdin; --dir shouldn't be required when using either flag.
 #[derive(Parser, Debug)]
-#[clap(version, about, long_about = None)]
+#[clap(version, about, long_about = None, subcommand_negates_reqs = true)]
 struct Args {
-	/// Just encrypt the specified payload, writing to stdout
-	#[clap(long)]
-	encrypt: Option<PathBuf>,
-
-	/// Just decrypt the specified payload, writing to stdout
-	#[clap(long)]
-	decrypt: bool,
+	#[command(subcommand)]
+	command: Option<Commands>,
 
 	// In debug mode we won't auto-fill dir with the user's data dir.  Instead this argument is required.
 	// This is so devs don't accidentally mess up their personal Fortress data during development.
 	#[cfg(debug_assertions)]
-	#[clap(long, value_parser)]
-	dir: PathBuf,
+	#[clap(long, value_parser, required = true)]
+	dir: Option<PathBuf>,
 
 	#[cfg(not(debug_assertions))]
 	#[clap(long, value_parser)]
 	dir: Option<PathBuf>,
+}
 
-	/// Password used only by the --encrypt and --decrypt flags
-	#[clap(long)]
-	password: Option<String>,
+#[derive(Subcommand, Debug)]
+enum Commands {
+	/// Just encrypt the specified payload, writing to stdout
+	Encrypt { path: PathBuf },
+
+	/// Just decrypt the specified payload, writing to stdout
+	Decrypt { path: PathBuf },
 }
 
 
 fn main() {
 	let args = Args::parse();
 
+	// Handle encrypt/decrypt commands
+	match &args.command {
+		Some(Commands::Encrypt { path }) => {
+			let password = read_password();
+
+			do_encrypt(path, &password);
+			return;
+		},
+		Some(Commands::Decrypt { path }) => {
+			let password = read_password();
+
+			do_decrypt(path, &password);
+			return;
+		},
+		None => {},
+	}
+
+	// Handle normal operation
 	#[cfg(not(debug_assertions))]
 	let data_dir = args.dir.unwrap_or_else(|| {
 		directories::ProjectDirs::from("", "", "Fortress")
@@ -70,7 +87,7 @@ fn main() {
 			.to_owned()
 	});
 	#[cfg(debug_assertions)]
-	let data_dir = args.dir;
+	let data_dir = args.dir.expect("Data dir is required in debug mode");
 
 	fs::create_dir_all(&data_dir).expect("Failed to create data directory");
 
@@ -81,22 +98,6 @@ fn main() {
 
 	let config_path = data_dir.join("config.json");
 	let database_path = data_dir.join("database.fortress");
-
-	if args.decrypt {
-		// TODO: Read from stdin (safely)
-		let password = args.password.expect("Password required when decrypting");
-
-		do_decrypt(database_path, &password);
-		return;
-	}
-
-	if let Some(encrypt_path) = args.encrypt {
-		// TODO: Read from stdin (safely)
-		let password = args.password.expect("Password required when encrypting");
-
-		do_encrypt(encrypt_path, &password);
-		return;
-	}
 
 	let config = if config_path.exists() {
 		let reader = File::open(&config_path).expect("Failed to open config file");
@@ -131,8 +132,20 @@ fn main() {
 }
 
 
+fn read_password() -> String {
+	// NOTE: We could use something like the rpassword crate to read this without showing the password
+	// on screen, but that adds another dependency and the decrypt/encrypt commands are generally only
+	// used during development or exotic scenarios.
+	let mut password = String::new();
+	eprint!("Password: ");
+	io::stderr().flush().unwrap();
+	io::stdin().read_line(&mut password).expect("Failed to read password from stdin");
+	password.trim_end().to_owned()
+}
+
+
+/// Read file and decrypt
 fn do_decrypt<P: AsRef<Path>>(path: P, password: &str) {
-	// Read file and decrypt
 	let (payload, _) = {
 		let file = File::open(path).expect("Failed to open file");
 		let mut reader = BufReader::new(file);
@@ -144,6 +157,7 @@ fn do_decrypt<P: AsRef<Path>>(path: P, password: &str) {
 }
 
 
+/// Read file and encrypt
 fn do_encrypt<P: AsRef<Path>>(path: P, password: &str) {
 	let payload = {
 		let mut data = Vec::new();
