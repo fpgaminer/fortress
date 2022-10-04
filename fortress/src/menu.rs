@@ -58,6 +58,7 @@ impl ComponentUpdate<AppModel> for MenuModel {
 		}
 	}
 
+	#[allow(clippy::needless_return)]
 	fn update(&mut self, msg: MenuMsg, _components: &(), _sender: Sender<MenuMsg>, parent_sender: Sender<AppMsg>) {
 		match msg {
 			MenuMsg::SyncClicked => {
@@ -132,7 +133,7 @@ impl ComponentUpdate<AppModel> for MenuModel {
 				self.sync_keys_entry.set_text(&sync_keys);
 
 				if let Ok(database) = database {
-					self.username_entry.set_text(&database.get_username());
+					self.username_entry.set_text(database.get_username());
 				}
 			},
 			MenuMsg::ShowSyncKeysClicked => {

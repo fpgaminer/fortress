@@ -104,7 +104,6 @@ where
 				self.dialog.add_button(text, gtk::ResponseType::Other(idx as u16));
 			}
 
-			let sender = sender.clone();
 			let response_messages = config.buttons.iter().map(|(_, msg)| msg.clone()).collect::<Vec<_>>();
 			self.dialog.connect_response(move |_, response| {
 				if let gtk::ResponseType::Other(idx) = response {

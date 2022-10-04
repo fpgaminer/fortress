@@ -17,7 +17,7 @@ use std::{self, borrow::Borrow, collections::HashMap, hash::Hash};
 // serializing a DatabaseObject, modifying the serialized representation, and then Deserializing,
 // but the point is to make it difficult and unnatural to bypass the invariants; it shouldn't
 // happen accidentally.
-#[derive(Eq, PartialEq, Debug, Clone)]
+#[derive(Eq, PartialEq, Debug, Clone, Default)]
 pub struct DatabaseObjectMap {
 	inner: HashMap<ID, DatabaseObject>,
 }
@@ -67,7 +67,7 @@ impl DatabaseObjectMap {
 			},
 		}
 
-		self.inner.insert(object.get_id().clone(), object);
+		self.inner.insert(*object.get_id(), object);
 	}
 }
 
@@ -93,7 +93,7 @@ impl<'de> serde::Deserialize<'de> for DatabaseObjectMap {
 		Ok(DatabaseObjectMap {
 			inner: Vec::deserialize(deserializer)?
 				.into_iter()
-				.map(|object: DatabaseObject| (object.get_id().clone(), object))
+				.map(|object: DatabaseObject| (*object.get_id(), object))
 				.collect(),
 		})
 	}

@@ -64,10 +64,10 @@ impl ComponentUpdate<AppModel> for EntryEditorModel {
 			EntryEditorMsg::NewEntry => {},
 			EntryEditorMsg::EditEntry(entry) => {
 				self.title_entry.set_text(entry.get("title").map(|s| s.as_str()).unwrap_or(""));
-				self.username_entry.set_text(&entry.get("username").map(|s| s.as_str()).unwrap_or(""));
-				self.password_entry.set_text(&entry.get("password").map(|s| s.as_str()).unwrap_or(""));
-				self.url_entry.set_text(&entry.get("url").map(|s| s.as_str()).unwrap_or(""));
-				self.notes_entry.set_text(&entry.get("notes").map(|s| s.as_str()).unwrap_or(""));
+				self.username_entry.set_text(entry.get("username").map(|s| s.as_str()).unwrap_or(""));
+				self.password_entry.set_text(entry.get("password").map(|s| s.as_str()).unwrap_or(""));
+				self.url_entry.set_text(entry.get("url").map(|s| s.as_str()).unwrap_or(""));
+				self.notes_entry.set_text(entry.get("notes").map(|s| s.as_str()).unwrap_or(""));
 
 				self.entry = Some(entry);
 			},
@@ -131,7 +131,7 @@ impl ComponentUpdate<AppModel> for EntryEditorModel {
 				send!(
 					parent_sender,
 					AppMsg::EntryEditorSaved {
-						id: self.entry.as_ref().map(|e| e.get_id().clone()),
+						id: self.entry.as_ref().map(|e| *e.get_id()),
 						data,
 					}
 				);

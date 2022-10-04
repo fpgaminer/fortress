@@ -45,10 +45,10 @@ impl ComponentUpdate<AppModel> for ViewDatabaseModel {
 		// TODO: Fuzzy search
 		let search_entry_clone = search_entry.clone();
 		list_model.set_visible_func(move |model, iter| {
-			let title = model.get_value(&iter, 1).get::<String>().unwrap().to_lowercase();
+			let title = model.get_value(iter, 1).get::<String>().unwrap().to_lowercase();
 			let search_string = search_entry_clone.text().to_lowercase();
 
-			if search_string != "" {
+			if !search_string.is_empty() {
 				title.contains(&search_string)
 			} else {
 				true
@@ -131,7 +131,7 @@ impl Widgets<ViewDatabaseModel, AppModel> for ViewDatabaseWidgets {
 					let selection = tree.selection();
 					if let Some((model, iter)) = selection.selected() {
 						let id = model.get_value(&iter, 0).get::<String>().unwrap();
-						let id = ID::from_slice(&mut HEXLOWER_PERMISSIVE.decode(id.as_bytes()).unwrap()).unwrap();
+						let id = ID::from_slice(&HEXLOWER_PERMISSIVE.decode(id.as_bytes()).unwrap()).unwrap();
 
 						send!(sender, ViewDatabaseMsg::ViewEntry(id));
 					}

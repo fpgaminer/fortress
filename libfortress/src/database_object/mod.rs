@@ -20,9 +20,9 @@ pub enum DatabaseObject {
 
 impl DatabaseObject {
 	pub fn get_id(&self) -> &ID {
-		match self {
-			&DatabaseObject::Entry(ref e) => e.get_id(),
-			&DatabaseObject::Directory(ref d) => d.get_id(),
+		match *self {
+			DatabaseObject::Entry(ref e) => e.get_id(),
+			DatabaseObject::Directory(ref d) => d.get_id(),
 		}
 	}
 }

@@ -80,7 +80,7 @@ impl NetworkKeySuite {
 		let salt = &hmac_512(&NETWORK_USERNAME_SALT, username).into_bytes()[..32];
 		let mut raw_keys = [0u8; 256 + 32];
 		let scrypt_params = scrypt::Params::new(NETWORK_SCRYPT_LOG_N, NETWORK_SCRYPT_R, NETWORK_SCRYPT_P).expect("scrypt parameters should be valid");
-		scrypt::scrypt(password, &salt, &scrypt_params, &mut raw_keys).expect("internal error");
+		scrypt::scrypt(password, salt, &scrypt_params, &mut raw_keys).expect("internal error");
 
 		let (siv_keys, raw_keys) = raw_keys.split_at(256);
 		let (login_key, _) = raw_keys.split_at(32);
@@ -160,7 +160,7 @@ pub fn decrypt_from_file<R: Read>(reader: &mut R, password: &[u8]) -> Result<(Ve
 	}
 
 	// Parse header
-	let (params, payload) = parse_header(&filedata)?;
+	let (params, payload) = parse_header(filedata)?;
 
 	// Derive keys
 	let file_key_suite = FileKeySuite::derive(password, &params)?;

@@ -135,7 +135,7 @@ impl Database {
 	}
 
 	pub fn add_entry(&mut self, entry: Entry) {
-		self.get_root_mut().add(entry.get_id().clone());
+		self.get_root_mut().add(*entry.get_id());
 		self.objects.update(DatabaseObject::Entry(entry));
 	}
 
@@ -156,7 +156,7 @@ impl Database {
 	pub fn save_to_path<P: AsRef<Path>>(&self, path: P) -> Result<(), FortressError> {
 		// Create a temporary file to write to
 		let mut temp_file = {
-			let parent_directory = path.as_ref().parent().ok_or(io::Error::new(io::ErrorKind::NotFound, "Bad path"))?;
+			let parent_directory = path.as_ref().parent().ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "Bad path"))?;
 			NamedTempFile::new_in(parent_directory)?
 		};
 
@@ -252,7 +252,7 @@ impl Database {
 					}
 				} else {
 					let object = self
-						.sync_api_get_object(&client, &url, &server_id)?
+						.sync_api_get_object(&client, &url, server_id)?
 						.ok_or(FortressError::SyncInconsistentServer)?;
 					self.objects.update(object);
 				}
@@ -266,16 +266,16 @@ impl Database {
 				if let Some(server_siv) = server_objects.get(local_id) {
 					if encrypted_object.siv != *server_siv {
 						// Object is different, upload it
-						self.sync_api_update_object(&client, &url, &local_object, server_siv)?;
+						self.sync_api_update_object(&client, &url, local_object, server_siv)?;
 						loop_again = true;
 					}
 				} else {
 					// Object is missing from server, upload it
-					self.sync_api_update_object(&client, &url, &local_object, &SIV([0; 32]))?;
+					self.sync_api_update_object(&client, &url, local_object, &SIV([0; 32]))?;
 				}
 			}
 
-			if loop_again == false {
+			if !loop_again {
 				break;
 			}
 		}
@@ -294,7 +294,7 @@ impl Database {
 			"",
 		)?
 		.json()
-		.map_err(|e| ApiError::from(e))
+		.map_err(ApiError::from)
 	}
 
 	/// Upload object to fortress server
@@ -308,7 +308,7 @@ impl Database {
 			.expect("internal error");
 
 		api_request(
-			&client,
+			client,
 			self.sync_parameters.get_login_id(),
 			self.sync_parameters.get_login_key(),
 			Method::POST,
@@ -324,7 +324,7 @@ impl Database {
 		let url = url.join(&format!("/object/{}", id.to_hex())).expect("internal error");
 
 		let response = api_request(
-			&client,
+			client,
 			self.sync_parameters.get_login_id(),
 			self.sync_parameters.get_login_key(),
 			Method::GET,
@@ -430,7 +430,7 @@ pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: b
 		alphabet.extend(alphabet_numbers.chars());
 	}
 
-	if alphabet.len() == 0 {
+	if alphabet.is_empty() {
 		return String::new();
 	}
 
@@ -438,7 +438,7 @@ pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: b
 	let mut result = String::new();
 
 	for _ in 0..length {
-		result.push(alphabet.choose(&mut OsRng).expect("internal error").clone());
+		result.push(*alphabet.choose(&mut OsRng).expect("internal error"));
 	}
 
 	result

@@ -46,7 +46,7 @@ impl ComponentUpdate<AppModel> for GenerateModel {
 			GenerateMsg::GenerateClicked => {
 				let other_chars = self.other_entry.text();
 
-				if !self.lowercase && !self.uppercase && !self.numbers && other_chars.len() == 0 {
+				if !self.lowercase && !self.uppercase && !self.numbers && other_chars.is_empty() {
 					// TODO: Display an error
 					return;
 				}

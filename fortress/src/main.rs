@@ -140,7 +140,7 @@ fn do_decrypt<P: AsRef<Path>>(path: P, password: &str) {
 		libfortress::fortresscrypto::decrypt_from_file(&mut reader, password.as_bytes()).expect("Failed to decrypt file")
 	};
 
-	io::stdout().write(&payload).expect("Failed to write to stdout");
+	io::stdout().write_all(&payload).expect("Failed to write to stdout");
 }
 
 
@@ -348,19 +348,20 @@ impl Widgets<AppModel, ()> for AppWidgets {
 
 	fn post_view() {
 		AppWidgets::update_stack(
-			&stack,
+			stack,
 			&model.state,
-			&stack_child_create,
-			&stack_child_open,
-			&stack_child_database,
-			&stack_child_entry,
-			&stack_child_generate,
-			&stack_child_menu,
+			stack_child_create,
+			stack_child_open,
+			stack_child_database,
+			stack_child_entry,
+			stack_child_generate,
+			stack_child_menu,
 		);
 	}
 }
 
 impl AppWidgets {
+	#[allow(clippy::too_many_arguments)]
 	fn update_stack(
 		stack: &gtk::Stack,
 		state: &AppState,

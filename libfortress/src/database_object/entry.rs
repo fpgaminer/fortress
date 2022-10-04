@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::{
 	borrow::Borrow,
 	collections::{BTreeMap, HashMap},
-	hash::{Hash, Hasher},
+	hash::Hash,
 	ops::Index,
 };
 
@@ -22,15 +22,16 @@ pub struct Entry {
 }
 
 impl Entry {
+	#[allow(clippy::new_without_default)]
 	pub fn new() -> Entry {
 		Entry::inner_new(OsRng.gen(), Vec::new(), unix_timestamp()).unwrap()
 	}
 
 	fn inner_new(id: ID, history: Vec<EntryHistory>, time_created: u64) -> Option<Entry> {
 		let mut entry = Entry {
-			id: id,
+			id,
 			history: history.clone(),
-			time_created: time_created,
+			time_created,
 
 			state: HashMap::new(),
 		};
@@ -135,7 +136,7 @@ impl Entry {
 			}
 		}
 
-		return true;
+		true
 	}
 }
 
@@ -166,7 +167,7 @@ impl<'de> serde::Deserialize<'de> for Entry {
 
 		let entry: PartialDeserialized = serde::Deserialize::deserialize(deserializer)?;
 
-		Entry::inner_new(entry.id, entry.history, entry.time_created).ok_or(serde::de::Error::custom("Invalid history"))
+		Entry::inner_new(entry.id, entry.history, entry.time_created).ok_or_else(|| serde::de::Error::custom("Invalid history"))
 	}
 }
 
@@ -190,12 +191,6 @@ impl EntryHistory {
 		String: Borrow<Q>,
 	{
 		self.data.get(key)
-	}
-}
-
-impl Hash for EntryHistory {
-	fn hash<H: Hasher>(&self, state: &mut H) {
-		self.time.hash(state);
 	}
 }
 

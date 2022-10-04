@@ -18,6 +18,7 @@ pub struct Directory {
 }
 
 impl Directory {
+	#[allow(clippy::new_without_default)]
 	pub fn new() -> Directory {
 		Directory {
 			id: OsRng.gen(),
@@ -159,7 +160,7 @@ impl Directory {
 			}
 		}
 
-		return true;
+		true
 	}
 }
 
@@ -177,7 +178,7 @@ impl<'de> serde::Deserialize<'de> for Directory {
 		let d: DirectoryDeserialized = serde::Deserialize::deserialize(deserializer)?;
 
 		// Re-builds state and validates
-		Directory::from_history(d.id, d.history).ok_or(serde::de::Error::custom("Invalid history"))
+		Directory::from_history(d.id, d.history).ok_or_else(|| serde::de::Error::custom("Invalid history"))
 	}
 }
 
