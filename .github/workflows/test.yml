@@ -8,7 +8,7 @@ jobs:
     name: Check
     runs-on: ubuntu-latest
     steps:
-      - run: apt-get update && apt-get install -y libssl-dev lib-gtk-4-dev
+      - run: sudo apt-get update && sudo apt-get install -y libssl-dev lib-gtk-4-dev
       - uses: actions/checkout@v3
       - uses: actions-rs/toolchain@v1
         with:
@@ -23,7 +23,7 @@ jobs:
     name: Run test suite
     runs-on: ubuntu-latest
     steps:
-      - run: apt-get update && apt-get install -y libssl-dev lib-gtk-4-dev
+      - run: sudo apt-get update && sudo apt-get install -y libssl-dev lib-gtk-4-dev
       - uses: actions/checkout@v3
       - uses: actions-rs/toolchain@v1
         with:
