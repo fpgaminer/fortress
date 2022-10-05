@@ -1,16 +1,18 @@
 mod sync_server;
 
 use libfortress::{Database, Entry, EntryHistory};
+use reqwest::Url;
 use std::collections::HashMap;
 
 
 #[test]
 fn sync_integration_test() {
 	// Start testing server
-	let sync_url = sync_server::server();
+	let sync_url = Url::parse(&sync_server::server()).unwrap();
 
 	// Build database
 	let mut db = Database::new_with_password("username", "foobar");
+	db.set_sync_url(Some(sync_url.clone()));
 
 	let mut entry1 = Entry::new();
 	entry1.edit(EntryHistory::new(HashMap::new()));
@@ -99,22 +101,22 @@ fn sync_integration_test() {
 	// Sync db
 	let db_before_sync = db.clone();
 
-	db.sync(&sync_url).unwrap();
+	db.sync().unwrap();
 
 	// Syncing right now shouldn't change anything
-	db.sync(&sync_url).unwrap();
+	db.sync().unwrap();
 	assert_eq!(db, db_before_sync);
 
 	// Syncing the older database should bring it up to speed
-	db_old.sync(&sync_url).unwrap();
+	db_old.sync().unwrap();
 	assert_eq!(db_old, db);
 
 	// But still shouldn't affect db
-	db.sync(&sync_url).unwrap();
+	db.sync().unwrap();
 	assert_eq!(db, db_before_sync);
 
 	// Syncing parallel_db should pick up db's edits
-	parallel_db.sync(&sync_url).unwrap();
+	parallel_db.sync().unwrap();
 	assert_eq!(
 		parallel_db.get_entry_by_id(entry3.get_id()).unwrap(),
 		db.get_entry_by_id(entry3.get_id()).unwrap()
@@ -122,18 +124,19 @@ fn sync_integration_test() {
 	assert_ne!(parallel_db, db);
 
 	// Now syncing db should pick up parallel db's edits
-	db.sync(&sync_url).unwrap();
+	db.sync().unwrap();
 	assert_eq!(parallel_db, db);
 	assert_ne!(db, db_old);
 
 	// Everything should be synced now
-	parallel_db.sync(&sync_url).unwrap();
+	parallel_db.sync().unwrap();
 	assert_eq!(parallel_db, db);
 
 	// Now test bootstrapping from nothing but username and password
 	let mut bootstrap_db = Database::new_with_password("username", "foobar");
+	bootstrap_db.set_sync_url(Some(sync_url.clone()));
 
-	bootstrap_db.sync(&sync_url).unwrap();
+	bootstrap_db.sync().unwrap();
 	// We compare the serialized forms, because things like the FileKeySuite won't be equal
 	assert_eq!(serde_json::to_string(&bootstrap_db).unwrap(), serde_json::to_string(&db).unwrap());
 }

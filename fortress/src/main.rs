@@ -20,7 +20,6 @@ use relm4::{
 	send, AppUpdate, Model, RelmApp, RelmComponent, Sender, WidgetPlus, Widgets,
 };
 use relm4_components::ParentWindow;
-use serde::{Deserialize, Serialize};
 use std::{
 	cell::{RefCell, RefMut},
 	fs::{self, File},
@@ -96,20 +95,7 @@ fn main() {
 		return;
 	}
 
-	let config_path = data_dir.join("config.json");
 	let database_path = data_dir.join("database.fortress");
-
-	let config = if config_path.exists() {
-		let reader = File::open(&config_path).expect("Failed to open config file");
-		serde_json::from_reader(reader).expect("Failed to parse config file")
-	} else {
-		let config = Config { sync_url: "".to_owned() };
-
-		config.save_to_path(&config_path).expect("Failed to save config file");
-
-		config
-	};
-	let config = Rc::new(RefCell::new(config));
 
 	// This needs to be called before building AppModel, because we need to call things like EntryBuffer::new().
 	gtk::init().expect("Failed to initialize GTK");
@@ -123,8 +109,6 @@ fn main() {
 			AppState::CreateDatabase
 		},
 		database,
-		config,
-		config_path,
 		database_path,
 	};
 	let app = RelmApp::new(model);
@@ -179,8 +163,6 @@ fn do_encrypt<P: AsRef<Path>>(path: P, password: &str) {
 struct AppModel {
 	state: AppState,
 	database: Rc<RefCell<Option<Database>>>,
-	config: Rc<RefCell<Config>>,
-	config_path: PathBuf,
 	database_path: PathBuf,
 }
 
@@ -412,23 +394,4 @@ struct AppComponents {
 	entry_editor: RelmComponent<EntryEditorModel, AppModel>,
 	generate: RelmComponent<GenerateModel, AppModel>,
 	menu: RelmComponent<MenuModel, AppModel>,
-}
-
-
-#[derive(Serialize, Deserialize)]
-struct Config {
-	sync_url: String,
-}
-
-impl Config {
-	fn save_to_path<P: AsRef<Path>>(&self, path: P) -> io::Result<()> {
-		// Writes to a temp file and then atomically swaps it over; for fault tolerance.
-		let temp_path = path.as_ref().with_extension("tmp");
-		{
-			let writer = File::create(&temp_path)?;
-			serde_json::to_writer(writer, &self)?;
-		}
-
-		fs::rename(&temp_path, path)
-	}
 }
