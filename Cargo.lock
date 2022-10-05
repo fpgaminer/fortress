@@ -1253,9 +1253,9 @@ dependencies = [
 
 [[package]]
 name = "relm4"
-version = "0.4.4"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e737555426b35a18e9f6fa8d291ce858d358504d441d1e0a7b06ce6c905cc63"
+checksum = "99ee9560b45c800669e9967bb12735a552bd1b8628c54c8bcf02727a89df2e35"
 dependencies = [
  "fragile",
  "futures-core",
