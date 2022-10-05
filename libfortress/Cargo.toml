@@ -18,3 +18,4 @@ reqwest = { version = "0.11", features = ["default-tls", "blocking", "json" ] }
 tiny_http = "0.11"
 fortresscrypto = { version = "1", path = "../fortresscrypto" }
 subtle = "2.4.1"
+url = { version = "2", features = ["serde"] }

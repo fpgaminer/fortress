@@ -327,6 +327,7 @@ dependencies = [
  "relm4-components",
  "serde",
  "serde_json",
+ "url",
 ]
 
 [[package]]
@@ -893,6 +894,7 @@ dependencies = [
  "subtle",
  "tempfile",
  "tiny_http",
+ "url",
 ]
 
 [[package]]
@@ -1781,6 +1783,7 @@ dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
+ "serde",
 ]
 
 [[package]]

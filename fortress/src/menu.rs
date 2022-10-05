@@ -1,14 +1,14 @@
 use std::{
 	cell::{Ref, RefCell, RefMut},
-	io,
 	path::PathBuf,
 	rc::Rc,
 };
 
 use libfortress::Database;
 use relm4::{gtk, gtk::prelude::*, send, ComponentUpdate, Model, Sender, Widgets};
+use url::Url;
 
-use crate::{AppModel, AppMsg, Config};
+use crate::{AppModel, AppMsg};
 
 
 #[derive(Clone)]
@@ -31,8 +31,6 @@ pub struct MenuModel {
 
 	database: Rc<RefCell<Option<Database>>>,
 	database_path: PathBuf,
-	config_path: PathBuf,
-	config: Rc<RefCell<Config>>,
 }
 
 impl Model for MenuModel {
@@ -53,8 +51,6 @@ impl ComponentUpdate<AppModel> for MenuModel {
 
 			database: parent_model.database.clone(),
 			database_path: parent_model.database_path.clone(),
-			config_path: parent_model.config_path.clone(),
-			config: parent_model.config.clone(),
 		}
 	}
 
@@ -62,8 +58,7 @@ impl ComponentUpdate<AppModel> for MenuModel {
 	fn update(&mut self, msg: MenuMsg, _components: &(), _sender: Sender<MenuMsg>, parent_sender: Sender<AppMsg>) {
 		match msg {
 			MenuMsg::SyncClicked => {
-				if let Err(err) = self.save_config() {
-					send!(parent_sender, AppMsg::ShowError(format!("Failed to save config: {}", err)));
+				if self.save_sync_url(&parent_sender).is_err() {
 					return;
 				}
 
@@ -72,9 +67,7 @@ impl ComponentUpdate<AppModel> for MenuModel {
 					Err(_) => return,
 				};
 
-				let config = self.config.borrow();
-
-				if let Err(err) = database.sync(&config.sync_url) {
+				if let Err(err) = database.sync() {
 					send!(parent_sender, AppMsg::ShowError(format!("Failed to sync: {}", err)));
 					return;
 				}
@@ -109,8 +102,7 @@ impl ComponentUpdate<AppModel> for MenuModel {
 				}
 			},
 			MenuMsg::CloseClicked => {
-				if let Err(err) = self.save_config() {
-					send!(parent_sender, AppMsg::ShowError(format!("Failed to save config: {}", err)));
+				if self.save_sync_url(&parent_sender).is_err() {
 					return;
 				}
 
@@ -120,21 +112,17 @@ impl ComponentUpdate<AppModel> for MenuModel {
 				send!(parent_sender, AppMsg::CloseMenu);
 			},
 			MenuMsg::Refresh => {
-				let config = self.config.borrow();
-				self.sync_url_entry.set_text(&config.sync_url);
-
-				let database = Ref::filter_map(self.database.borrow(), |database| database.as_ref());
-
-				let sync_keys = match database {
-					Ok(ref database) => format!("{}:{}", database.get_login_id().to_hex(), database.get_login_key().to_hex()),
-					Err(_) => "".to_string(),
+				let database = match Ref::filter_map(self.database.borrow(), |database| database.as_ref()) {
+					Ok(database) => database,
+					Err(_) => return,
 				};
 
-				self.sync_keys_entry.set_text(&sync_keys);
+				let sync_keys = format!("{}:{}", database.get_login_id().to_hex(), database.get_login_key().to_hex());
+				let sync_url = database.get_sync_url().map(Url::as_str).unwrap_or_default();
 
-				if let Ok(database) = database {
-					self.username_entry.set_text(database.get_username());
-				}
+				self.sync_keys_entry.set_text(&sync_keys);
+				self.sync_url_entry.set_text(sync_url);
+				self.username_entry.set_text(database.get_username());
 			},
 			MenuMsg::ShowSyncKeysClicked => {
 				self.show_sync_keys = !self.show_sync_keys;
@@ -144,17 +132,32 @@ impl ComponentUpdate<AppModel> for MenuModel {
 }
 
 impl MenuModel {
-	fn save_config(&self) -> Result<(), io::Error> {
-		let mut config = self.config.borrow_mut();
-		let sync_url = self.sync_url_entry.text();
+	fn save_sync_url(&self, parent_sender: &Sender<AppMsg>) -> Result<(), ()> {
+		let mut database = match RefMut::filter_map(self.database.borrow_mut(), |database| database.as_mut()) {
+			Ok(database) => database,
+			Err(_) => return Err(()),
+		};
 
-		if config.sync_url == sync_url {
-			return Ok(());
+		let sync_url = if self.sync_url_entry.text().is_empty() {
+			None
+		} else {
+			match Url::parse(&self.sync_url_entry.text()) {
+				Ok(url) => Some(url),
+				Err(_) => {
+					send!(parent_sender, AppMsg::ShowError("Invalid sync URL".to_string()));
+					return Err(());
+				},
+			}
+		};
+
+		database.set_sync_url(sync_url);
+
+		if let Err(err) = database.save_to_path(&self.database_path) {
+			send!(parent_sender, AppMsg::ShowError(format!("Failed to save database: {}", err)));
+			Err(())
+		} else {
+			Ok(())
 		}
-
-		config.sync_url = sync_url;
-
-		config.save_to_path(&self.config_path)
 	}
 }
 

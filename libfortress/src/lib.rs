@@ -36,7 +36,7 @@ pub use errors::FortressError;
 pub use fortresscrypto;
 use fortresscrypto::{EncryptedObject, FileKeySuite, LoginId, LoginKey, SIV};
 use rand::{rngs::OsRng, seq::SliceRandom, Rng};
-use reqwest::{IntoUrl, Method, Url};
+use reqwest::{IntoUrl, Method};
 use serde::{Deserialize, Serialize};
 use std::{
 	collections::{HashMap, HashSet},
@@ -46,6 +46,7 @@ use std::{
 	str,
 };
 use tempfile::NamedTempFile;
+use url::Url;
 
 
 new_type! {
@@ -65,6 +66,8 @@ pub struct Database {
 
 	#[serde(skip_serializing, skip_deserializing)]
 	file_key_suite: FileKeySuite,
+
+	sync_url: Option<Url>,
 }
 
 impl Database {
@@ -86,6 +89,7 @@ impl Database {
 			objects,
 			sync_parameters,
 			file_key_suite,
+			sync_url: None,
 		}
 	}
 
@@ -113,6 +117,14 @@ impl Database {
 
 	pub fn get_login_key(&self) -> &LoginKey {
 		self.sync_parameters.get_login_key()
+	}
+
+	pub fn get_sync_url(&self) -> Option<&Url> {
+		self.sync_url.as_ref()
+	}
+
+	pub fn set_sync_url(&mut self, url: Option<Url>) {
+		self.sync_url = url;
 	}
 
 	pub fn get_root(&self) -> &Directory {
@@ -182,6 +194,7 @@ impl Database {
 		struct SerializableDatabase {
 			objects: DatabaseObjectMap,
 			sync_parameters: SyncParameters,
+			sync_url: Option<Url>,
 		}
 
 		// Read file and decrypt
@@ -201,23 +214,29 @@ impl Database {
 			sync_parameters: db.sync_parameters,
 
 			file_key_suite,
+			sync_url: db.sync_url,
 		})
 	}
 
 	// TODO: Sync should be performed in a separate background thread
 	// TODO: Instead of having library users call sync themselves, we should just have an init method which sets up a continuous automatic
 	// background sync.
-	pub fn sync<U: IntoUrl>(&mut self, url: U) -> Result<(), FortressError> {
-		let mut url = url.into_url().map_err(|_| FortressError::SyncBadUrl)?;
-		if !cfg!(debug_assertions) {
-			// Force HTTPS (except in debug builds where we do development and testing)
-			url.set_scheme("https").map_err(|_| FortressError::SyncBadUrl)?;
-		}
-		let client = reqwest::blocking::Client::new();
+	pub fn sync(&mut self) -> Result<(), FortressError> {
+		let url = self.sync_url.as_ref().ok_or(FortressError::SyncBadUrl)?;
+
+		// Force SSL on release builds
+		let client = if cfg!(debug_assertions) {
+			reqwest::blocking::Client::new()
+		} else {
+			reqwest::blocking::Client::builder()
+				.https_only(true)
+				.build()
+				.expect("Failed to build HTTPS-only client")
+		};
 
 		loop {
 			// Get list of objects from server
-			let server_objects = self.sync_api_list_objects(&client, &url)?.into_iter().collect::<HashMap<_, _>>();
+			let server_objects = self.sync_api_list_objects(&client, url)?.into_iter().collect::<HashMap<_, _>>();
 			let mut loop_again = false;
 
 			// Download any objects that we're missing or that differ
@@ -227,7 +246,7 @@ impl Database {
 
 					if encrypted_object.siv != *server_siv {
 						// Object is different, download it and merge
-						let server_object = match self.sync_api_get_object(&client, &url, server_id)? {
+						let server_object = match self.sync_api_get_object(&client, url, server_id)? {
 							Some(object) => object,
 							None => {
 								// We couldn't get the object from the server (could be a changed password).  Ignore.
@@ -252,7 +271,7 @@ impl Database {
 					}
 				} else {
 					let object = self
-						.sync_api_get_object(&client, &url, server_id)?
+						.sync_api_get_object(&client, url, server_id)?
 						.ok_or(FortressError::SyncInconsistentServer)?;
 					self.objects.update(object);
 				}
@@ -266,12 +285,12 @@ impl Database {
 				if let Some(server_siv) = server_objects.get(local_id) {
 					if encrypted_object.siv != *server_siv {
 						// Object is different, upload it
-						self.sync_api_update_object(&client, &url, local_object, server_siv)?;
+						self.sync_api_update_object(&client, url, local_object, server_siv)?;
 						loop_again = true;
 					}
 				} else {
 					// Object is missing from server, upload it
-					self.sync_api_update_object(&client, &url, local_object, &SIV([0; 32]))?;
+					self.sync_api_update_object(&client, url, local_object, &SIV([0; 32]))?;
 				}
 			}
 
