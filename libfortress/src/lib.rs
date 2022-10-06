@@ -128,17 +128,11 @@ impl Database {
 	}
 
 	pub fn get_root(&self) -> &Directory {
-		match self.objects.get(&ROOT_DIRECTORY_ID).expect("internal error") {
-			&DatabaseObject::Directory(ref dir) => dir,
-			_ => panic!(),
-		}
+		self.get_directory_by_id(&ROOT_DIRECTORY_ID).expect("Internal error")
 	}
 
 	pub fn get_root_mut(&mut self) -> &mut Directory {
-		match self.objects.get_mut(&ROOT_DIRECTORY_ID).expect("internal error") {
-			&mut DatabaseObject::Directory(ref mut dir) => dir,
-			_ => panic!(),
-		}
+		self.get_directory_by_id_mut(&ROOT_DIRECTORY_ID).expect("Internal error")
 	}
 
 	pub fn new_entry(&mut self) {
@@ -161,6 +155,20 @@ impl Database {
 	pub fn get_entry_by_id_mut(&mut self, id: &ID) -> Option<&mut Entry> {
 		match self.objects.get_mut(id)? {
 			&mut DatabaseObject::Entry(ref mut entry) => Some(entry),
+			_ => None,
+		}
+	}
+
+	pub fn get_directory_by_id(&self, id: &ID) -> Option<&Directory> {
+		match self.objects.get(id)? {
+			&DatabaseObject::Directory(ref dir) => Some(dir),
+			_ => None,
+		}
+	}
+
+	pub fn get_directory_by_id_mut(&mut self, id: &ID) -> Option<&mut Directory> {
+		match self.objects.get_mut(id)? {
+			&mut DatabaseObject::Directory(ref mut dir) => Some(dir),
 			_ => None,
 		}
 	}

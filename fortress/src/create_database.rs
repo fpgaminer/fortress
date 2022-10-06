@@ -48,11 +48,13 @@ impl ComponentUpdate<AppModel> for CreateDatabaseModel {
 					return;
 				}
 
-				let database = Database::new_with_password(username, password);
+				let mut database = Database::new_with_password(username, password);
 				if let Err(err) = database.save_to_path(&self.database_path) {
 					send!(parent_sender, AppMsg::ShowError(format!("Failed to create database: {}", err)));
 					return;
 				}
+
+				database.get_root_mut().rename("Root");
 
 				send!(parent_sender, AppMsg::DatabaseCreated(database));
 
