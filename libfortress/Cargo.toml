@@ -15,7 +15,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tempfile = "3.3.0"
 reqwest = { version = "0.11", features = ["default-tls", "blocking", "json" ] }
-tiny_http = "0.11"
+tiny_http = "0.12"
 fortresscrypto = { version = "1", path = "../fortresscrypto" }
 subtle = "2.4.1"
 url = { version = "2", features = ["serde"] }
