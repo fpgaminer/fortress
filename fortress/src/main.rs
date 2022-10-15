@@ -1,23 +1,25 @@
 mod create_database;
 mod dialog_modal;
 mod entry_editor;
-mod generate;
+mod generate_popover;
 mod menu;
 mod open_database;
+mod password_entry;
+#[cfg(target_os = "macos")]
+mod pasteboard;
 mod view_database;
 
 use clap::{Parser, Subcommand};
 use create_database::CreateDatabaseModel;
 use dialog_modal::{DialogConfig, DialogModel, DialogMsg};
 use entry_editor::{EntryEditorModel, EntryEditorMsg};
-use generate::GenerateModel;
 use gtk::prelude::GtkWindowExt;
 use libfortress::{Database, EntryHistory, ID};
 use menu::MenuModel;
 use open_database::OpenDatabaseModel;
 use relm4::{
-	gtk::{self, prelude::Cast, traits::WidgetExt},
-	send, AppUpdate, Model, RelmApp, RelmComponent, Sender, WidgetPlus, Widgets,
+	gtk::{self, prelude::Cast},
+	send, AppUpdate, Model, RelmApp, RelmComponent, Sender, Widgets,
 };
 use relm4_components::ParentWindow;
 use std::{
@@ -100,6 +102,9 @@ fn main() {
 	// This needs to be called before building AppModel, because we need to call things like EntryBuffer::new().
 	gtk::init().expect("Failed to initialize GTK");
 
+	// CSS
+	relm4::set_global_css(include_str!("../style.css").as_bytes());
+
 	let database = Rc::new(RefCell::new(None));
 
 	let model = AppModel {
@@ -171,23 +176,20 @@ enum AppMsg {
 	ShowError(String),
 
 	// From ViewDatabase
-	NewEntry,
+	NewEntry { parent: ID },
 	EditEntry(ID),
 	ShowMenu,
 
 	// From EntryEditor
-	EntryEditorSaved { id: Option<ID>, data: EntryHistory },
+	EntryEditorSavedNew { parent: ID, data: EntryHistory },
+	EntryEditorSavedEdit { id: ID, data: EntryHistory },
 	EntryEditorClosed,
-	GeneratePassword,
 
 	// From CreateDatabase
 	DatabaseCreated(Database),
 
 	// From OpenDatabase
 	DatabaseOpened(Database),
-
-	// From Generate
-	PasswordGenerated(Option<String>),
 
 	// From Dialog
 	CloseDialog,
@@ -203,7 +205,6 @@ enum AppState {
 	ViewDatabase,
 	EditEntry,
 	Menu,
-	GeneratePassword,
 }
 
 impl Model for AppModel {
@@ -229,28 +230,43 @@ impl AppUpdate for AppModel {
 				*self.database.borrow_mut() = Some(database);
 				self.state = AppState::ViewDatabase;
 			},
-			AppMsg::NewEntry => {
+			AppMsg::NewEntry { parent } => {
 				self.state = AppState::EditEntry;
-				components.entry_editor.send(EntryEditorMsg::NewEntry).unwrap();
+				components.entry_editor.send(EntryEditorMsg::NewEntry { parent }).unwrap();
 			},
 			AppMsg::EditEntry(id) => {
 				let entry = self.database.borrow().as_ref().unwrap().get_entry_by_id(&id).unwrap().clone();
 				self.state = AppState::EditEntry;
 				components.entry_editor.send(EntryEditorMsg::EditEntry(entry)).unwrap();
 			},
-			AppMsg::EntryEditorSaved { id, data } => {
+			AppMsg::EntryEditorSavedNew { parent, data } => {
 				let mut database = RefMut::filter_map(self.database.borrow_mut(), |database| database.as_mut()).expect("Database not open");
 
-				if let Some(id) = id {
-					// Edit entry
-					let entry = database.get_entry_by_id_mut(&id).expect("internal error");
-					entry.edit(data);
-				} else {
-					// New entry
-					let mut entry = libfortress::Entry::new();
-					entry.edit(data);
-					database.add_entry(entry);
+				// New entry
+				let mut entry = libfortress::Entry::new();
+				let entry_id = *entry.get_id();
+				entry.edit(data);
+				database.add_entry(entry);
+
+				if let Some(dir) = database.get_directory_by_id_mut(&parent) {
+					dir.add(entry_id);
+					database.get_root_mut().remove(entry_id);
 				}
+
+				if let Err(err) = database.save_to_path(&self.database_path) {
+					// TODO: This is a fatal error.  We should use a different dialog that allows the user to try and save again, or quit the application.
+					send!(sender, AppMsg::ShowError(format!("Failed to save database: {}", err)));
+					return true;
+				}
+
+				self.state = AppState::ViewDatabase;
+			},
+			AppMsg::EntryEditorSavedEdit { id, data } => {
+				let mut database = RefMut::filter_map(self.database.borrow_mut(), |database| database.as_mut()).expect("Database not open");
+
+				// Edit entry
+				let entry = database.get_entry_by_id_mut(&id).expect("internal error");
+				entry.edit(data);
 
 				if let Err(err) = database.save_to_path(&self.database_path) {
 					// TODO: This is a fatal error.  We should use a different dialog that allows the user to try and save again, or quit the application.
@@ -262,15 +278,6 @@ impl AppUpdate for AppModel {
 			},
 			AppMsg::EntryEditorClosed => {
 				self.state = AppState::ViewDatabase;
-			},
-			AppMsg::PasswordGenerated(password) => {
-				if let Some(password) = password {
-					components.entry_editor.send(EntryEditorMsg::PasswordGenerated(password)).unwrap();
-				}
-				self.state = AppState::EditEntry;
-			},
-			AppMsg::GeneratePassword => {
-				self.state = AppState::GeneratePassword;
 			},
 			AppMsg::CloseDialog => {
 				components.dialog.send(DialogMsg::Hide).unwrap();
@@ -294,7 +301,6 @@ impl Widgets<AppModel, ()> for AppWidgets {
 		stack_child_open: gtk::Box,
 		stack_child_entry: gtk::Box,
 		stack_child_database: gtk::Box,
-		stack_child_generate: gtk::Box,
 		stack_child_menu: gtk::Box,
 	}
 
@@ -305,17 +311,11 @@ impl Widgets<AppModel, ()> for AppWidgets {
 			set_default_height: 600,
 			set_child = stack = Some(&gtk::Stack) {
 				set_transition_type: gtk::StackTransitionType::SlideLeftRight,
-				set_margin_all: 5,
-				set_margin_start: 40,
-				set_margin_end: 40,
-				set_margin_top: 40,
-				set_margin_bottom: 40,
 
 				add_child: components.create_database.root_widget(),
 				add_child: components.open_database.root_widget(),
 				add_child: components.view_database.root_widget(),
 				add_child: components.entry_editor.root_widget(),
-				add_child: components.generate.root_widget(),
 				add_child: components.menu.root_widget(),
 			},
 		}
@@ -327,7 +327,6 @@ impl Widgets<AppModel, ()> for AppWidgets {
 		let stack_child_open = components.open_database.root_widget().clone();
 		let stack_child_database = components.view_database.root_widget().clone();
 		let stack_child_entry = components.entry_editor.root_widget().clone();
-		let stack_child_generate = components.generate.root_widget().clone();
 		let stack_child_menu = components.menu.root_widget().clone();
 
 		AppWidgets::update_stack(
@@ -337,7 +336,6 @@ impl Widgets<AppModel, ()> for AppWidgets {
 			&stack_child_open,
 			&stack_child_database,
 			&stack_child_entry,
-			&stack_child_generate,
 			&stack_child_menu,
 		);
 	}
@@ -350,7 +348,6 @@ impl Widgets<AppModel, ()> for AppWidgets {
 			stack_child_open,
 			stack_child_database,
 			stack_child_entry,
-			stack_child_generate,
 			stack_child_menu,
 		);
 	}
@@ -365,7 +362,6 @@ impl AppWidgets {
 		stack_child_open: &gtk::Box,
 		stack_child_database: &gtk::Box,
 		stack_child_entry: &gtk::Box,
-		stack_child_generate: &gtk::Box,
 		stack_child_menu: &gtk::Box,
 	) {
 		stack.set_visible_child(match state {
@@ -373,7 +369,6 @@ impl AppWidgets {
 			AppState::OpenDatabase => stack_child_open,
 			AppState::ViewDatabase => stack_child_database,
 			AppState::EditEntry => stack_child_entry,
-			AppState::GeneratePassword => stack_child_generate,
 			AppState::Menu => stack_child_menu,
 		});
 	}
@@ -392,6 +387,5 @@ struct AppComponents {
 	open_database: RelmComponent<OpenDatabaseModel, AppModel>,
 	view_database: RelmComponent<ViewDatabaseModel, AppModel>,
 	entry_editor: RelmComponent<EntryEditorModel, AppModel>,
-	generate: RelmComponent<GenerateModel, AppModel>,
 	menu: RelmComponent<MenuModel, AppModel>,
 }

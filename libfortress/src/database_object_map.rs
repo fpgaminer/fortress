@@ -69,6 +69,14 @@ impl DatabaseObjectMap {
 
 		self.inner.insert(*object.get_id(), object);
 	}
+
+	pub fn values(&self) -> impl Iterator<Item = &DatabaseObject> {
+		self.inner.values()
+	}
+
+	pub fn values_mut(&mut self) -> impl Iterator<Item = &mut DatabaseObject> {
+		self.inner.values_mut()
+	}
 }
 
 impl serde::Serialize for DatabaseObjectMap {

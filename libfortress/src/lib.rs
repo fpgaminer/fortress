@@ -145,6 +145,11 @@ impl Database {
 		self.objects.update(DatabaseObject::Entry(entry));
 	}
 
+	pub fn add_directory(&mut self, directory: Directory) {
+		self.get_root_mut().add(*directory.get_id());
+		self.objects.update(DatabaseObject::Directory(directory));
+	}
+
 	pub fn get_entry_by_id(&self, id: &ID) -> Option<&Entry> {
 		match self.objects.get(id)? {
 			&DatabaseObject::Entry(ref entry) => Some(entry),
@@ -171,6 +176,30 @@ impl Database {
 			&mut DatabaseObject::Directory(ref mut dir) => Some(dir),
 			_ => None,
 		}
+	}
+
+	pub fn list_directories(&self) -> impl Iterator<Item = &Directory> {
+		self.objects.values().filter_map(|obj| obj.as_directory())
+	}
+
+	pub fn list_directories_mut(&mut self) -> impl Iterator<Item = &mut Directory> {
+		self.objects.values_mut().filter_map(|obj| obj.as_directory_mut())
+	}
+
+	pub fn list_entries(&self) -> impl Iterator<Item = &Entry> {
+		self.objects.values().filter_map(|obj| obj.as_entry())
+	}
+
+	pub fn list_entries_mut(&mut self) -> impl Iterator<Item = &mut Entry> {
+		self.objects.values_mut().filter_map(|obj| obj.as_entry_mut())
+	}
+
+	pub fn get_parent_directory(&self, id: &ID) -> Option<&Directory> {
+		self.list_directories().find(move |dir| dir.contains(id))
+	}
+
+	pub fn get_parent_directory_mut(&mut self, id: &ID) -> Option<&mut Directory> {
+		self.list_directories_mut().find(move |dir| dir.contains(id))
 	}
 
 	pub fn save_to_path<P: AsRef<Path>>(&self, path: P) -> Result<(), FortressError> {
@@ -373,10 +402,18 @@ impl Database {
 			siv,
 		};
 
-		match self.sync_parameters.get_network_key_suite().decrypt_object(&id[..], &encrypted_object) {
-			Ok(plaintext) => Ok(Some(serde_json::from_slice(&plaintext)?)),
+		let plaintext = match self.sync_parameters.get_network_key_suite().decrypt_object(&id[..], &encrypted_object) {
+			Ok(plaintext) => plaintext,
 			Err(err) => {
 				println!("WARNING: Error while decrypting server object(ID: {}): {}", id.to_hex(), err);
+				return Ok(None);
+			},
+		};
+
+		match serde_json::from_slice(&plaintext) {
+			Ok(object) => Ok(Some(object)),
+			Err(err) => {
+				println!("WARNING: Error while deserializing server object(ID: {}): {}", id.to_hex(), err);
 				Ok(None)
 			},
 		}
