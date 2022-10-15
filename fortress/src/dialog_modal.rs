@@ -91,7 +91,7 @@ where
 		if let Some(config) = &model.config {
 			let builder = MessageDialogBuilder::new()
 				.message_type(gtk::MessageType::Error)
-				.visible(true)
+				.visible(false)
 				.text(&config.title)
 				.secondary_text(&config.text)
 				.modal(true);
@@ -111,6 +111,8 @@ where
 					send!(sender, DialogMsg::Response(msg));
 				}
 			});
+
+			self.dialog.show();
 		}
 	}
 }

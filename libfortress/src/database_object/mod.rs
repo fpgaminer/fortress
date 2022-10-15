@@ -25,4 +25,32 @@ impl DatabaseObject {
 			DatabaseObject::Directory(ref d) => d.get_id(),
 		}
 	}
+
+	pub fn as_directory(&self) -> Option<&Directory> {
+		match self {
+			DatabaseObject::Directory(d) => Some(d),
+			_ => None,
+		}
+	}
+
+	pub fn as_directory_mut(&mut self) -> Option<&mut Directory> {
+		match self {
+			DatabaseObject::Directory(d) => Some(d),
+			_ => None,
+		}
+	}
+
+	pub fn as_entry(&self) -> Option<&Entry> {
+		match self {
+			DatabaseObject::Entry(e) => Some(e),
+			_ => None,
+		}
+	}
+
+	pub fn as_entry_mut(&mut self) -> Option<&mut Entry> {
+		match self {
+			DatabaseObject::Entry(e) => Some(e),
+			_ => None,
+		}
+	}
 }

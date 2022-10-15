@@ -160,8 +160,12 @@ impl Directory {
 	}
 
 	/// List all Directory entries in this directory.
-	pub fn list_directories<'a>(&'a self, database: &Database) -> Vec<&'a ID> {
-		self.entries.iter().filter(|id| database.get_directory_by_id(id).is_some()).collect()
+	pub fn list_directories<'a>(&'a self, database: &'a Database) -> impl Iterator<Item = &'a ID> + '_ {
+		self.entries.iter().filter(|id| database.get_directory_by_id(id).is_some())
+	}
+
+	pub fn contains(&self, id: &ID) -> bool {
+		self.entries.contains(id)
 	}
 
 	/// Merge self and other, returning a new Directory.

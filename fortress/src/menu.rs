@@ -5,7 +5,7 @@ use std::{
 };
 
 use libfortress::Database;
-use relm4::{gtk, gtk::prelude::*, send, ComponentUpdate, Model, Sender, Widgets};
+use relm4::{gtk, gtk::prelude::*, send, ComponentUpdate, Model, Sender, WidgetPlus, Widgets};
 use url::Url;
 
 use crate::{AppModel, AppMsg};
@@ -15,19 +15,19 @@ use crate::{AppModel, AppMsg};
 pub enum MenuMsg {
 	// From UI
 	SyncClicked,
-	ChangeUsernameAndPasswordClicked,
+	ChangeUsernameAndPasswordClicked {
+		username: String,
+		password: String,
+		repeat_password: String,
+	},
 	CloseClicked,
 	Refresh,
-	ShowSyncKeysClicked,
 }
 
 pub struct MenuModel {
 	sync_url_entry: gtk::EntryBuffer,
-	username_entry: gtk::EntryBuffer,
-	password_entry: gtk::EntryBuffer,
-	password_again_entry: gtk::EntryBuffer,
-	sync_keys_entry: gtk::EntryBuffer,
-	show_sync_keys: bool,
+	username: String,
+	sync_keys: String,
 
 	database: Rc<RefCell<Option<Database>>>,
 	database_path: PathBuf,
@@ -43,11 +43,8 @@ impl ComponentUpdate<AppModel> for MenuModel {
 	fn init_model(parent_model: &AppModel) -> Self {
 		Self {
 			sync_url_entry: gtk::EntryBuffer::new(None),
-			username_entry: gtk::EntryBuffer::new(None),
-			password_entry: gtk::EntryBuffer::new(None),
-			password_again_entry: gtk::EntryBuffer::new(None),
-			sync_keys_entry: gtk::EntryBuffer::new(None),
-			show_sync_keys: false,
+			username: String::new(),
+			sync_keys: String::new(),
 
 			database: parent_model.database.clone(),
 			database_path: parent_model.database_path.clone(),
@@ -78,12 +75,12 @@ impl ComponentUpdate<AppModel> for MenuModel {
 					return;
 				}
 			},
-			MenuMsg::ChangeUsernameAndPasswordClicked => {
-				let username = self.username_entry.text();
-				let password = self.password_entry.text();
-				let password_again = self.password_again_entry.text();
-
-				if password != password_again {
+			MenuMsg::ChangeUsernameAndPasswordClicked {
+				username,
+				password,
+				repeat_password,
+			} => {
+				if password != repeat_password {
 					send!(parent_sender, AppMsg::ShowError("Passwords do not match".to_string()));
 					return;
 				}
@@ -100,15 +97,17 @@ impl ComponentUpdate<AppModel> for MenuModel {
 					send!(parent_sender, AppMsg::ShowError(format!("Failed to save database: {}", err)));
 					return;
 				}
+
+				// TODO: Show a success dialog and clear the UI fields.
 			},
 			MenuMsg::CloseClicked => {
 				if self.save_sync_url(&parent_sender).is_err() {
 					return;
 				}
 
-				self.username_entry.set_text("");
-				self.password_entry.set_text("");
-				self.password_again_entry.set_text("");
+				self.username.clear();
+				self.sync_keys.clear();
+
 				send!(parent_sender, AppMsg::CloseMenu);
 			},
 			MenuMsg::Refresh => {
@@ -120,12 +119,9 @@ impl ComponentUpdate<AppModel> for MenuModel {
 				let sync_keys = format!("{}:{}", database.get_login_id().to_hex(), database.get_login_key().to_hex());
 				let sync_url = database.get_sync_url().map(Url::as_str).unwrap_or_default();
 
-				self.sync_keys_entry.set_text(&sync_keys);
+				self.sync_keys = sync_keys;
+				self.username = database.get_username().to_owned();
 				self.sync_url_entry.set_text(sync_url);
-				self.username_entry.set_text(database.get_username());
-			},
-			MenuMsg::ShowSyncKeysClicked => {
-				self.show_sync_keys = !self.show_sync_keys;
 			},
 		}
 	}
@@ -167,121 +163,149 @@ impl Widgets<MenuModel, AppModel> for MenuWidgets {
 	view! {
 		gtk::Box {
 			set_orientation: gtk::Orientation::Vertical,
+			set_vexpand: true,
 
-			append = &gtk::Box {
-				set_orientation: gtk::Orientation::Horizontal,
+			append = &gtk::CenterBox {
+				set_margin_all: 10,
 
-				append = &gtk::Label {
-					set_text: "Sync URL:",
-				},
-				append = &gtk::Entry {
-					set_buffer: &model.sync_url_entry,
-					set_hexpand: true,
-					set_input_purpose: gtk::InputPurpose::Url,
-				},
-			},
+				set_start_widget = Some(&gtk::Button) {
+					set_icon_name: "go-previous-symbolic",
 
-			append = &gtk::Button {
-				set_label: "Sync",
-				set_hexpand: true,
-				connect_clicked(sender) => move |_| {
-					send!(sender, MenuMsg::SyncClicked);
-				},
-			},
-
-			append = &gtk::Separator {
-				set_orientation: gtk::Orientation::Horizontal,
-				set_margin_top: 10,
-				set_margin_bottom: 10,
-			},
-
-			append = &gtk::Box {
-				set_orientation: gtk::Orientation::Horizontal,
-
-				append = &gtk::Label {
-					set_text: "Username:",
-				},
-				append = &gtk::Entry {
-					set_buffer: &model.username_entry,
-					set_hexpand: true,
-				},
-			},
-
-			append = &gtk::Box {
-				set_orientation: gtk::Orientation::Horizontal,
-
-				append = &gtk::Label {
-					set_text: "Password:",
-				},
-				append = &gtk::Entry {
-					set_buffer: &model.password_entry,
-					set_hexpand: true,
-					set_visibility: false,
-					set_input_purpose: gtk::InputPurpose::Password,
-				},
-			},
-
-			append = &gtk::Box {
-				set_orientation: gtk::Orientation::Horizontal,
-
-				append = &gtk::Label {
-					set_text: "Password (again):",
-				},
-				append = &gtk::Entry {
-					set_buffer: &model.password_again_entry,
-					set_hexpand: true,
-					set_visibility: false,
-					set_input_purpose: gtk::InputPurpose::Password,
-				},
-			},
-
-			append = &gtk::Button {
-				set_label: "Change username and password",
-				set_hexpand: true,
-				connect_clicked(sender) => move |_| {
-					send!(sender, MenuMsg::ChangeUsernameAndPasswordClicked);
-				},
-			},
-
-			append = &gtk::Separator {
-				set_orientation: gtk::Orientation::Horizontal,
-				set_margin_top: 10,
-				set_margin_bottom: 10,
-			},
-
-			append = &gtk::Box {
-				set_orientation: gtk::Orientation::Horizontal,
-
-				append = &gtk::Label {
-					set_text: "Sync keys:",
-				},
-				append = &gtk::Entry {
-					set_buffer: &model.sync_keys_entry,
-					set_hexpand: true,
-					set_visibility: watch!(model.show_sync_keys),
-					set_input_purpose: gtk::InputPurpose::Password,
-					set_editable: false,
-					set_can_focus: false,
-				},
-				append = &gtk::Button {
-					set_label: watch!(if model.show_sync_keys { "Hide" } else { "Show" }),
 					connect_clicked(sender) => move |_| {
-						send!(sender, MenuMsg::ShowSyncKeysClicked);
+						send!(sender, MenuMsg::CloseClicked);
 					},
 				},
+
+				set_center_widget = Some(&gtk::Label) {
+					set_text: "Settings",
+					add_css_class: "h1",
+				},
 			},
 
 			append = &gtk::Separator {
 				set_orientation: gtk::Orientation::Horizontal,
-				set_margin_top: 10,
-				set_margin_bottom: 10,
 			},
 
-			append = &gtk::Button {
-				set_label: "Close",
-				set_hexpand: true,
-				connect_clicked(sender) => move |_| {
-					send!(sender, MenuMsg::CloseClicked);
+			append = &gtk::Box {
+				set_orientation: gtk::Orientation::Vertical,
+				set_halign: gtk::Align::Center,
+				set_valign: gtk::Align::Center,
+				set_vexpand: true,
+				set_spacing: 10,
+
+				append = &gtk::Label {
+					set_text: "Sync",
+					add_css_class: "h2",
+					set_hexpand: true,
+					set_halign: gtk::Align::Start,
+				},
+
+				append = &gtk::Grid {
+					set_row_spacing: 5,
+					set_column_spacing: 10,
+
+					attach(1, 1, 1, 1) = &gtk::Label {
+						set_text: "Sync URL",
+						set_halign: gtk::Align::End,
+					},
+					attach(2, 1, 1, 1) = &gtk::Entry {
+						set_buffer: &model.sync_url_entry,
+						set_hexpand: true,
+						set_input_purpose: gtk::InputPurpose::Url,
+					},
+				},
+
+				append = &gtk::Button {
+					set_label: "Sync",
+					set_hexpand: true,
+					connect_clicked(sender) => move |_| {
+						send!(sender, MenuMsg::SyncClicked);
+					},
+				},
+
+				append = &gtk::Separator {
+					set_orientation: gtk::Orientation::Horizontal,
+					set_margin_top: 20,
+					set_margin_bottom: 20,
+				},
+
+				append = &gtk::Label {
+					set_text: "Username and Password",
+					add_css_class: "h2",
+					set_hexpand: true,
+					set_halign: gtk::Align::Start,
+				},
+
+				append = &gtk::Grid {
+					set_row_spacing: 5,
+					set_column_spacing: 10,
+
+					attach(1, 1, 1, 1) = &gtk::Label {
+						set_text: "Username",
+						set_halign: gtk::Align::End,
+					},
+					attach(2, 1, 1, 1): username = &gtk::Entry {
+						set_text: watch!(&model.username),
+						set_hexpand: true,
+						set_width_chars: 30,
+					},
+					attach(1, 2, 1, 1) = &gtk::Label {
+						set_text: "Password",
+						set_halign: gtk::Align::End,
+					},
+					attach(2, 2, 1, 1): password = &gtk::PasswordEntry {
+						set_hexpand: true,
+						set_show_peek_icon: true,
+
+						connect_unmap => |entry| {
+							entry.set_text("");
+						},
+					},
+					attach(1, 3, 1, 1) = &gtk::Label {
+						set_text: "Password (again)",
+						set_halign: gtk::Align::End,
+					},
+					attach(2, 3, 1, 1): repeat_password = &gtk::PasswordEntry {
+						set_hexpand: true,
+						set_show_peek_icon: true,
+
+						connect_unmap => |entry| {
+							entry.set_text("");
+						},
+					},
+				},
+
+				append = &gtk::Button {
+					set_label: "Change",
+					set_hexpand: true,
+					connect_clicked(username, password, repeat_password, sender) => move |_| {
+						send!(sender, MenuMsg::ChangeUsernameAndPasswordClicked {
+							username: username.text().to_string(),
+							password: password.text().to_string(),
+							repeat_password: repeat_password.text().to_string(),
+						});
+					},
+				},
+
+				append = &gtk::Separator {
+					set_orientation: gtk::Orientation::Horizontal,
+					set_margin_top: 20,
+					set_margin_bottom: 20,
+				},
+
+				append = &gtk::Label {
+					set_text: "Sync Keys",
+					add_css_class: "h2",
+					set_hexpand: true,
+					set_halign: gtk::Align::Start,
+				},
+
+				append = &gtk::PasswordEntry {
+					set_hexpand: true,
+					set_editable: false,
+					set_can_focus: false,
+					set_show_peek_icon: true,
+					set_text: watch!(&model.sync_keys),
 				},
 			},
 
