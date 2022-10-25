@@ -1,0 +1,91 @@
+.entry-editor-header {
+	background-color: #566674;
+	display: flex;
+	flex-direction: row;
+	justify-content: start;
+	padding: 0.5em 0.5em;
+	gap: 0.5em;
+}
+
+.entry-editor-header button {
+	padding: 0;
+	width: 43px;
+	height: 43px;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+}
+
+.entry-editor-main {
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	text-align: left;
+	padding: 0.5em 0.5em;
+	gap: 0.5em;
+}
+
+.entry-editor-main .field {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+}
+
+.entry-editor-main .field:last-of-type {
+	flex: 1;
+}
+
+.entry-editor-main .field textarea {
+	flex: 1;
+}
+
+.entry-editor-main .field .password-input {
+	display: flex;
+	align-items: stretch;
+	flex-direction: row;
+}
+
+.entry-editor-main .field .password-input .show-password {
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+}
+
+.entry-editor-main .field .password-input input {
+	flex: 1;
+}
+
+.generate-menu {
+	padding: 1em 1em;
+	font-size: 0.8em;
+
+	position: absolute;
+	background-color: #ffffff;
+	border: 1px solid #566674;
+	border-radius: .25rem;
+	color: #0f0f0f;
+	margin: 2px 0 0;
+	min-width: 160px;
+	text-align: left;
+	display: flex;
+	flex-direction: column;
+	transition: opacity 250ms ease !important;
+}
+
+.generate-menu input+label {
+	padding-left: 0.4em;
+}
+
+.generate-menu label {
+	font-weight: bold;
+}
+
+.generate-menu input {
+	background-color: #0f1f2f18;
+	color: black;
+}
+
+.generate-menu button {
+	margin-top: 1em;
+}

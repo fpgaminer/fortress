@@ -13,6 +13,10 @@ I decided to write my own password manager.  I wanted a password manager that I 
 * Simple design - I opt for simplicity over performance; easier to audit the code and design.
 * Trustless - The code is open source.  Data sync is end-to-end encrypted.
 
+## Development
+
+During development, the main `fortress` program can be run using `cargo tauri dev -- --no-default-features -- --dir [SOMEPATH]`. It includes hot-reloading.
+
 ## Database Format
 
 ### Motivation
