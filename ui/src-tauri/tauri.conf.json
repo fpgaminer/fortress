@@ -46,14 +46,6 @@
         "timestampUrl": ""
       }
     },
-    "cli": {
-      "args": [
-        {
-          "name": "dir",
-          "takesValue": true
-        }
-      ]
-    },
     "security": {
       "csp": null
     },
