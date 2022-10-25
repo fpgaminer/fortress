@@ -1,0 +1,29 @@
+[package]
+authors = ["fpgaminer"]
+name = "fortress"
+version = "1.0.1"
+license = "MIT/Apache-2.0"
+repository = "https://github.com/fpgaminer/fortress"
+description = "Password manager"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "1.1", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+tauri = { version = "1.1", features = ["api-all", "cli"] }
+clap = { version = "4", features = ["derive"] }
+data-encoding = "2.3.2"
+directories = "4.0.1"
+libfortress = { version = "1", path = "../../libfortress" }
+url = "2"
+
+[features]
+# by default Tauri runs in production mode
+# when `tauri dev` runs it is executed with `cargo run --no-default-features` if `devPath` is an URL
+default = [ "custom-protocol" ]
+# this feature is used used for production builds where `devPath` points to the filesystem
+# DO NOT remove this
+custom-protocol = [ "tauri/custom-protocol" ]

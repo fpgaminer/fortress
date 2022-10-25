@@ -1,0 +1,13 @@
+.create-database {
+	padding-top: 10vh;
+}
+
+.create-database form {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+}
+
+.create-database button {
+	margin-top: 1em;
+}

@@ -1,6 +1,6 @@
 [workspace]
 members = [
-	"fortress",
 	"libfortress",
 	"fortresscrypto",
+	"ui/src-tauri",
 ]

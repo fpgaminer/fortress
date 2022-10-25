@@ -1,0 +1,131 @@
+.view-database {
+	overflow: hidden;
+}
+
+.view-database-header {
+	background-color: #566674;
+	display: flex;
+	flex-direction: row;
+	justify-content: end;
+	padding: 0.5em 0.5em;
+	gap: 0.5em;
+}
+
+.view-database-header button {
+	padding: 0;
+	width: 43px;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+}
+
+.view-database-main {
+	display: flex;
+	flex: 1;
+	align-items: stretch;
+	overflow: hidden;
+}
+
+.view-database-main .directories {
+	width: 15em;
+	text-align: left;
+	background-color: #667684;
+	padding-top: 1em;
+	display: flex;
+	flex-direction: column;
+	gap: 0.2em;
+	overflow-y: scroll;
+}
+
+.view-database-main .entries {
+	flex: 1;
+	padding: 0;
+	overflow-y: scroll;
+}
+
+.directory-item {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	padding-left: 1.5em;
+	padding-top: 0.5em;
+	padding-bottom: 0.5em;
+	font-weight: bold;
+}
+
+.directory-item input {
+	margin: 0 0 0 0.5em;
+	width: 8em;
+}
+
+.directory-item:hover {
+	cursor: pointer;
+}
+
+.directory-item.selected {
+	background-color: #566674;
+}
+
+.directory-item .icon {
+	color: #96a6b4;
+	width: 24px;
+	flex: 0 0 auto;
+}
+
+.directory-item:hover .icon {
+	color: #ffffff;
+}
+
+.directory-item-name {
+	display: inline-block;
+	margin-left: 1em;
+}
+
+.entries th div {
+	resize: horizontal;
+}
+
+.entries tbody {
+	text-align: left;
+}
+
+.entries thead th {
+	text-align: left;
+	padding: 0.1em 0.5em;
+	position: sticky;
+	top: 0;
+	background-color: #768694;
+}
+
+.entries table {
+	border-collapse: collapse;
+	width: 100%;
+}
+
+.entries tr {
+	border: solid;
+	border-width: 1px 0;
+	border-color: #566674;
+	background-color: #768694;
+}
+
+.entries thead td {
+	border-width: 1px;
+}
+
+.entries tr:first-child {
+	border-top: none;
+}
+
+.entries thead th {
+	padding: 0.1em 0.5em;
+}
+
+.entries tbody td {
+	padding: 0.1em 0.5em;
+}
+
+.entries tbody tr:hover {
+	background-color: #566674;
+	cursor: pointer;
+}

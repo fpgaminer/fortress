@@ -202,6 +202,20 @@ impl Database {
 		self.list_directories_mut().find(move |dir| dir.contains(id))
 	}
 
+	pub fn move_object(&mut self, id: &ID, new_parent: &ID) {
+		let old_parent = self.get_parent_directory_mut(id).map(|d| *d.get_id());
+
+		// Add to new parent first (so the entry isn't dangling during the operation)
+		if let Some(parent) = self.get_directory_by_id_mut(new_parent) {
+			parent.add(*id);
+		}
+
+		// Remove from old parent
+		if let Some(parent) = old_parent.and_then(|id| self.get_directory_by_id_mut(&id)) {
+			parent.remove(*id);
+		}
+	}
+
 	pub fn save_to_path<P: AsRef<Path>>(&self, path: P) -> Result<(), FortressError> {
 		// Create a temporary file to write to
 		let mut temp_file = {
