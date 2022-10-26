@@ -263,11 +263,7 @@ fn edit_entry(entry_id: Option<ID>, data: HashMap<String, String>, parent_id: ID
 			let entry_id = *entry.get_id();
 			entry.edit(data);
 			database.add_entry(entry);
-
-			if let Some(dir) = database.get_directory_by_id_mut(&parent_id) {
-				dir.add(entry_id);
-				database.get_root_mut().remove(entry_id);
-			}
+			database.move_object(&entry_id, &parent_id);
 		}
 
 		if let Err(err) = database.save_to_path(&state.database_path) {
