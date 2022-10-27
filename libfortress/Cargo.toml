@@ -1,7 +1,7 @@
 [package]
 authors = ["fpgaminer"]
 name = "libfortress"
-version = "1.0.1"
+version = "2.0.0"
 license = "MIT/Apache-2.0"
 repository = "https://github.com/fpgaminer/fortress"
 description = "Fortress library"
@@ -16,6 +16,6 @@ serde_json = "1"
 tempfile = "3.3.0"
 reqwest = { version = "0.11", features = ["default-tls", "blocking", "json" ] }
 tiny_http = "0.12"
-fortresscrypto = { version = "1", path = "../fortresscrypto" }
+fortresscrypto = { version = "2", path = "../fortresscrypto" }
 subtle = "2.4.1"
 url = { version = "2", features = ["serde"] }

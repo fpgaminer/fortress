@@ -1,7 +1,7 @@
 [package]
 authors = ["fpgaminer"]
 name = "fortress"
-version = "1.0.1"
+version = "2.0.0"
 license = "MIT/Apache-2.0"
 repository = "https://github.com/fpgaminer/fortress"
 description = "Password manager"
@@ -17,7 +17,7 @@ tauri = { version = "1.1", features = ["dialog-all"] }
 clap = { version = "4", features = ["derive"] }
 data-encoding = "2.3.2"
 directories = "4.0.1"
-libfortress = { version = "1", path = "../../libfortress" }
+libfortress = { version = "2", path = "../../libfortress" }
 url = "2"
 
 [features]

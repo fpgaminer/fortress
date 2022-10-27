@@ -1,7 +1,7 @@
 [package]
 authors = ["fpgaminer"]
 name = "fortresscrypto"
-version = "1.0.1"
+version = "2.0.0"
 license = "MIT/Apache-2.0"
 repository = "https://github.com/fpgaminer/fortress"
 description = "Cryptography helper library for fortress"

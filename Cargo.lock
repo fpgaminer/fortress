@@ -732,7 +732,7 @@ dependencies = [
 
 [[package]]
 name = "fortress"
-version = "1.0.1"
+version = "2.0.0"
 dependencies = [
  "clap",
  "data-encoding",
@@ -747,7 +747,7 @@ dependencies = [
 
 [[package]]
 name = "fortresscrypto"
-version = "1.0.1"
+version = "2.0.0"
 dependencies = [
  "byteorder",
  "chacha20",
@@ -1487,7 +1487,7 @@ checksum = "68783febc7782c6c5cb401fbda4de5a9898be1762314da0bb2c10ced61f18b0c"
 
 [[package]]
 name = "libfortress"
-version = "1.0.1"
+version = "2.0.0"
 dependencies = [
  "byteorder",
  "data-encoding",
