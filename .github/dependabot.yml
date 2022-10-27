@@ -10,5 +10,5 @@ updates:
     schedule: {interval: daily}
   
   - package-ecosystem: npm
-    directory: /
+    directory: /ui
     schedule: {interval: daily}
