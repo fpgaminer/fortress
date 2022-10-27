@@ -1,17 +1,17 @@
 mod sync_server;
 
-use libfortress::{Database, Entry, EntryHistory};
+use libfortress::{Database, Entry, EntryHistory, FortressError};
 use reqwest::Url;
 use std::collections::HashMap;
 
 
 #[test]
 fn sync_integration_test() {
-	// Start testing server
-	let sync_url = Url::parse(&sync_server::server()).unwrap();
-
 	// Build database
 	let mut db = Database::new_with_password("username", "foobar");
+
+	// Start testing server
+	let sync_url = Url::parse(&sync_server::server(db.get_login_key().clone())).unwrap();
 	db.set_sync_url(Some(sync_url.clone()));
 
 	let mut entry1 = Entry::new();
@@ -139,7 +139,33 @@ fn sync_integration_test() {
 	bootstrap_db.sync().unwrap();
 	// We compare the serialized forms, because things like the FileKeySuite won't be equal
 	assert_eq!(serde_json::to_string(&bootstrap_db).unwrap(), serde_json::to_string(&db).unwrap());
+
+	// Now test password change
+	let mut old_db = db.clone();
+
+	db.get_root_mut().rename("New Root Name".to_string());
+
+	// Change password on db
+	db.change_password("username", "barfoo");
+
+	// Sync so the server has the new password
+	db.sync().unwrap();
+
+	// Sync again to ensure the new password still works
+	db.sync().unwrap();
+
+	// Syncing the old database should fail with 401
+	match old_db.sync() {
+		Err(FortressError::SyncApiError(libfortress::ApiError::ApiError(401, _))) => (),
+		_ => panic!("Syncing with old password should fail"),
+	}
+
+	// Now change the password on the old database
+	old_db.change_password("username", "barfoo");
+
+	// Syncing the old database should now work
+	old_db.sync().unwrap();
+
+	// And the databases should be equal (except for the FileKeySuite)
+	assert_eq!(serde_json::to_string(&db).unwrap(), serde_json::to_string(&old_db).unwrap());
 }
-
-
-// TODO: Test password change (not fully implemented yet, so can't test yet)
