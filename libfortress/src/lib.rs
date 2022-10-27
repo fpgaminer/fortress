@@ -68,6 +68,9 @@ pub struct Database {
 	file_key_suite: FileKeySuite,
 
 	sync_url: Option<Url>,
+
+	/// If password is changed, this is set to the old sync parameters until the server is successfully told about the change.
+	old_sync_parameters: Option<SyncParameters>,
 }
 
 impl Database {
@@ -90,6 +93,7 @@ impl Database {
 			sync_parameters,
 			file_key_suite,
 			sync_url: None,
+			old_sync_parameters: None,
 		}
 	}
 
@@ -100,11 +104,10 @@ impl Database {
 		let encryption_parameters = Default::default();
 		self.file_key_suite = FileKeySuite::derive(password.as_bytes(), &encryption_parameters).expect("Internal error: Scrypt parameters were invalid.");
 
+		self.old_sync_parameters = Some(self.sync_parameters.clone());
+
 		// TODO: Derive in a background thread
 		self.sync_parameters = SyncParameters::new(username, password);
-
-		// TODO: Need to tell server about our new login-key using our old login-key
-		// TODO: We should re-sync after this
 	}
 
 	pub fn get_username(&self) -> &str {
@@ -250,6 +253,7 @@ impl Database {
 			objects: DatabaseObjectMap,
 			sync_parameters: SyncParameters,
 			sync_url: Option<Url>,
+			old_sync_parameters: Option<SyncParameters>,
 		}
 
 		// Read file and decrypt
@@ -265,6 +269,7 @@ impl Database {
 
 			file_key_suite,
 			sync_url: db.sync_url,
+			old_sync_parameters: db.old_sync_parameters,
 		})
 	}
 
@@ -290,6 +295,12 @@ impl Database {
 				.build()
 				.expect("Failed to build HTTPS-only client")
 		};
+
+		// If password was previously changed, tell the server first
+		if let Some(old_sync_parameters) = &self.old_sync_parameters {
+			self.sync_api_update_login_key(&client, url, old_sync_parameters)?;
+			self.old_sync_parameters = None;
+		}
 
 		loop {
 			// Get list of objects from server
@@ -439,6 +450,37 @@ impl Database {
 		}
 	}
 
+	/// Tell the server about a change in our LoginKey
+	fn sync_api_update_login_key(&self, client: &reqwest::blocking::Client, url: &Url, old_sync_parameters: &SyncParameters) -> Result<(), ApiError> {
+		let body = self.sync_parameters.get_login_key().0.to_vec();
+		let url = url.join("/user/login_key").expect("internal error");
+		let test_url = url.join("/objects").expect("internal error");
+
+		match api_request(
+			client,
+			old_sync_parameters.get_login_id(),
+			old_sync_parameters.get_login_key(),
+			Method::POST,
+			url,
+			body,
+		) {
+			Ok(_) => Ok(()),
+			Err(ApiError::ApiError(401, _)) => {
+				// It's possible the server already knows about the new key, let's check by doing a test request
+				api_request(
+					client,
+					self.sync_parameters.get_login_id(),
+					self.sync_parameters.get_login_key(),
+					Method::GET,
+					test_url,
+					"",
+				)
+				.map(|_| ())
+			},
+			Err(err) => Err(err),
+		}
+	}
+
 	fn encrypt_object(&self, object: &DatabaseObject) -> EncryptedObject {
 		let payload = serde_json::to_vec(&object).expect("internal error");
 		self.sync_parameters.get_network_key_suite().encrypt_object(&object.get_id()[..], &payload)
@@ -449,7 +491,7 @@ impl Database {
 #[derive(Debug)]
 pub enum ApiError {
 	ReqwestError(reqwest::Error),
-	ApiError(String),
+	ApiError(u16, String),
 }
 
 impl From<reqwest::Error> for ApiError {
@@ -462,7 +504,7 @@ impl std::fmt::Display for ApiError {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
 			ApiError::ReqwestError(err) => write!(f, "Reqwest error: {}", err),
-			ApiError::ApiError(err) => write!(f, "API error: {}", err),
+			ApiError::ApiError(_, err) => write!(f, "API error: {}", err),
 		}
 	}
 }
@@ -486,8 +528,9 @@ where
 	if response.status().is_success() {
 		Ok(response)
 	} else {
+		let status = response.status();
 		let error = response.text()?;
-		Err(ApiError::ApiError(error))
+		Err(ApiError::ApiError(status.into(), error))
 	}
 }
 

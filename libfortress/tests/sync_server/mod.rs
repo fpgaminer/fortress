@@ -1,18 +1,18 @@
 // A simplified in-memory Fortress server used for sync tests
 use data_encoding::HEXLOWER_PERMISSIVE;
-use fortresscrypto::SIV;
+use fortresscrypto::{LoginKey, SIV};
 use libfortress::ID;
 use std::{collections::HashMap, thread};
 use tiny_http::{Method, Response, Server};
 
 
 // Starts a server and returns the address it is listening on
-pub fn server() -> String {
+pub fn server(mut login_key: LoginKey) -> String {
 	let mut db = HashMap::new();
 	let server = Server::http("127.0.0.1:0").unwrap();
 	let addr = server.server_addr().to_string();
 
-	let api = |method: Method, url: Vec<&str>, body: Vec<u8>, db: &mut HashMap<ID, Vec<u8>>| match (method, url.as_slice()) {
+	let api = |method: Method, url: Vec<&str>, body: Vec<u8>, db: &mut HashMap<ID, Vec<u8>>, login_key: &mut LoginKey| match (method, url.as_slice()) {
 		(Method::Get, ["objects"]) => {
 			let response: Vec<_> = db
 				.iter()
@@ -38,6 +38,13 @@ pub fn server() -> String {
 			db.insert(id, body);
 			Response::from_string("".to_string())
 		},
+		(Method::Post, ["user", "login_key"]) => {
+			let key = LoginKey::from_slice(body.as_slice()).unwrap();
+
+			*login_key = key;
+
+			Response::from_string("".to_string())
+		},
 		_ => panic!("404"),
 	};
 
@@ -58,7 +65,15 @@ pub fn server() -> String {
 				continue;
 			}
 
-			request.respond(api(method, url, body, &mut db)).unwrap();
+			// Check login key
+			let auth = LoginKey::from_slice(&auth[32..]).unwrap();
+
+			if auth != login_key {
+				request.respond(Response::from_string("".to_string()).with_status_code(401)).unwrap();
+				continue;
+			}
+
+			request.respond(api(method, url, body, &mut db, &mut login_key)).unwrap();
 		}
 	});
 
