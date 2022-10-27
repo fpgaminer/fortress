@@ -12,6 +12,10 @@ Fortress is being actively developed.  I use it myself.  It's not quite ready fo
 * Simple design - I opt for simplicity over performance; easier to audit the code and design.
 * Trustless - The code is open source.  Data sync is end-to-end encrypted.
 
+## Building
+
+A production binary can be built using `cargo tauri build`.
+
 ## Development
 
 During development, the main `fortress` program can be run using `cargo tauri dev -- --no-default-features -- --dir [SOMEPATH]`. It includes hot-reloading.

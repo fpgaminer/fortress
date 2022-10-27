@@ -7,15 +7,18 @@
   },
   "package": {
     "productName": "fortress",
-    "version": "1.0.0"
+    "version": "../package.json"
   },
   "tauri": {
     "allowlist": {
-      "all": true
+      "all": false,
+      "dialog": {
+        "all": true
+      }
     },
     "bundle": {
       "active": true,
-      "category": "DeveloperTool",
+      "category": "Productivity",
       "copyright": "",
       "deb": {
         "depends": []
