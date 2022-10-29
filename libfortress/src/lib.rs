@@ -45,6 +45,7 @@ use std::{
 	path::Path,
 	str,
 };
+use sync_parameters::FrozenSyncParameters;
 use tempfile::NamedTempFile;
 use url::Url;
 
@@ -62,15 +63,14 @@ const ROOT_DIRECTORY_ID: ID = ID([0; 32]);
 pub struct Database {
 	objects: DatabaseObjectMap,
 
+	/// This can be None while it is being generated in the background.
 	sync_parameters: SyncParameters,
+	sync_url: Option<Url>,
+	/// If password is changed, this is set to the old sync parameters until the server is successfully told about the change.
+	old_sync_parameters: Option<FrozenSyncParameters>,
 
 	#[serde(skip_serializing, skip_deserializing)]
 	file_key_suite: FileKeySuite,
-
-	sync_url: Option<Url>,
-
-	/// If password is changed, this is set to the old sync parameters until the server is successfully told about the change.
-	old_sync_parameters: Option<SyncParameters>,
 }
 
 impl Database {
@@ -104,7 +104,11 @@ impl Database {
 		let encryption_parameters = Default::default();
 		self.file_key_suite = FileKeySuite::derive(password.as_bytes(), &encryption_parameters).expect("Internal error: Scrypt parameters were invalid.");
 
-		self.old_sync_parameters = Some(self.sync_parameters.clone());
+		// Don't need to inform the server if we're changing username
+		if username == self.sync_parameters.get_username() {
+			// TODO: When we implement background generation, this should instead return an error
+			self.old_sync_parameters = Some(self.sync_parameters.freeze().expect("internal error"));
+		}
 
 		// TODO: Derive in a background thread
 		self.sync_parameters = SyncParameters::new(username, password);
@@ -119,7 +123,7 @@ impl Database {
 	}
 
 	pub fn get_login_key(&self) -> &LoginKey {
-		self.sync_parameters.get_login_key()
+		self.sync_parameters.get_login_key().expect("internal error")
 	}
 
 	pub fn get_sync_url(&self) -> Option<&Url> {
@@ -253,14 +257,19 @@ impl Database {
 			objects: DatabaseObjectMap,
 			sync_parameters: SyncParameters,
 			sync_url: Option<Url>,
-			old_sync_parameters: Option<SyncParameters>,
+			old_sync_parameters: Option<FrozenSyncParameters>,
 		}
 
 		// Read file and decrypt
 		let (plaintext, file_key_suite) = fortresscrypto::decrypt_from_file(reader, password.as_bytes())?;
 
 		// Deserialize
-		let db: SerializableDatabase = serde_json::from_slice(&plaintext)?;
+		let mut db: SerializableDatabase = serde_json::from_slice(&plaintext)?;
+
+		// TODO: Background derive
+		if db.sync_parameters.get_network_key_suite().is_none() {
+			db.sync_parameters.derive(password);
+		}
 
 		// Keep encryption keys for quicker saving later
 		Ok(Database {
@@ -375,7 +384,7 @@ impl Database {
 		api_request(
 			client,
 			self.sync_parameters.get_login_id(),
-			self.sync_parameters.get_login_key(),
+			self.sync_parameters.get_login_key().expect("TODO: Update when background derive is in"),
 			Method::GET,
 			url.join("/objects").expect("internal error"),
 			"",
@@ -397,7 +406,7 @@ impl Database {
 		api_request(
 			client,
 			self.sync_parameters.get_login_id(),
-			self.sync_parameters.get_login_key(),
+			self.sync_parameters.get_login_key().expect("TODO: Update when background derive is in"),
 			Method::POST,
 			url,
 			body,
@@ -410,10 +419,11 @@ impl Database {
 	fn sync_api_get_object(&self, client: &reqwest::blocking::Client, url: &Url, id: &ID) -> Result<Option<DatabaseObject>, FortressError> {
 		let url = url.join(&format!("/object/{}", id.to_hex())).expect("internal error");
 
+		// TODO: Update when background derive is in
 		let response = api_request(
 			client,
 			self.sync_parameters.get_login_id(),
-			self.sync_parameters.get_login_key(),
+			self.sync_parameters.get_login_key().expect("internal error"),
 			Method::GET,
 			url,
 			"",
@@ -433,7 +443,13 @@ impl Database {
 			siv,
 		};
 
-		let plaintext = match self.sync_parameters.get_network_key_suite().decrypt_object(&id[..], &encrypted_object) {
+		// TODO: Update when background derive is in
+		let plaintext = match self
+			.sync_parameters
+			.get_network_key_suite()
+			.expect("internal error")
+			.decrypt_object(&id[..], &encrypted_object)
+		{
 			Ok(plaintext) => plaintext,
 			Err(err) => {
 				println!("WARNING: Error while decrypting server object(ID: {}): {}", id.to_hex(), err);
@@ -451,8 +467,9 @@ impl Database {
 	}
 
 	/// Tell the server about a change in our LoginKey
-	fn sync_api_update_login_key(&self, client: &reqwest::blocking::Client, url: &Url, old_sync_parameters: &SyncParameters) -> Result<(), ApiError> {
-		let body = self.sync_parameters.get_login_key().0.to_vec();
+	fn sync_api_update_login_key(&self, client: &reqwest::blocking::Client, url: &Url, old_sync_parameters: &FrozenSyncParameters) -> Result<(), ApiError> {
+		// TODO: Update when background derive is in
+		let body = self.sync_parameters.get_login_key().expect("internal error").0.to_vec();
 		let url = url.join("/user/login_key").expect("internal error");
 		let test_url = url.join("/objects").expect("internal error");
 
@@ -470,7 +487,7 @@ impl Database {
 				api_request(
 					client,
 					self.sync_parameters.get_login_id(),
-					self.sync_parameters.get_login_key(),
+					self.sync_parameters.get_login_key().expect("internal error"), // TODO: Update once background derive is in
 					Method::GET,
 					test_url,
 					"",
@@ -483,7 +500,11 @@ impl Database {
 
 	fn encrypt_object(&self, object: &DatabaseObject) -> EncryptedObject {
 		let payload = serde_json::to_vec(&object).expect("internal error");
-		self.sync_parameters.get_network_key_suite().encrypt_object(&object.get_id()[..], &payload)
+		// TODO: Update once background derive is in
+		self.sync_parameters
+			.get_network_key_suite()
+			.expect("internal error")
+			.encrypt_object(&object.get_id()[..], &payload)
 	}
 }
 
