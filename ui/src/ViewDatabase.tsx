@@ -65,10 +65,10 @@ function sortEntries(entries: Entry[]) {
 
 	// Sort by time created (and then by ID as a tie breaker)
 	result.sort((a, b) => {
-		if (a.state.created === b.state.created) {
-			return a.id.localeCompare(b.id);
+		if (a.time_created === b.time_created) {
+			return b.id.localeCompare(a.id);
 		} else {
-			return a.time_created - b.time_created;
+			return b.time_created - a.time_created;
 		}
 	});
 
