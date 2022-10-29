@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# WARNING!!! HAZARD!!! This script is NOT up-to-date for Fortress V2.
 # Converts a KeePass XML file (which can be exported from KeePass) to a Fortress JSON
 # The resulting Fortress JSON can be piped through GZip and then encrypted using "fortress --encrypt"
 # WARNING: This conversion is LOSSY.
