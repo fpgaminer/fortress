@@ -39,7 +39,7 @@ impl SyncParameters {
 	pub fn freeze(&self) -> Option<FrozenSyncParameters> {
 		self.network_key_suite.as_ref().map(|network_key_suite| FrozenSyncParameters {
 			login_id: self.login_id,
-			network_key_suite: network_key_suite.clone(),
+			login_key: network_key_suite.login_key.clone(),
 		})
 	}
 
@@ -87,7 +87,7 @@ impl<'de> serde::Deserialize<'de> for SyncParameters {
 #[derive(Serialize, Deserialize, Eq, PartialEq, Debug, Clone)]
 pub struct FrozenSyncParameters {
 	login_id: LoginId,
-	network_key_suite: NetworkKeySuite,
+	login_key: LoginKey,
 }
 
 impl FrozenSyncParameters {
@@ -95,11 +95,7 @@ impl FrozenSyncParameters {
 		&self.login_id
 	}
 
-	pub fn get_network_key_suite(&self) -> &NetworkKeySuite {
-		&self.network_key_suite
-	}
-
 	pub fn get_login_key(&self) -> &LoginKey {
-		&self.network_key_suite.login_key
+		&self.login_key
 	}
 }
