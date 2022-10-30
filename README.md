@@ -1,3 +1,5 @@
+[![Coverage Status](https://coveralls.io/repos/github/fpgaminer/fortress/badge.svg?branch=master)](https://coveralls.io/github/fpgaminer/fortress?branch=master)
+
 # Fortress
 Remember one password, securely manage the rest.  Fortress is insanely secure and automatically synced between devices.
 
