@@ -30,6 +30,16 @@ jobs:
           profile: minimal
           toolchain: stable
           override: true
+      - name: Configure cache
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: test-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
       - uses: actions-rs/cargo@v1
         with:
           command: test
@@ -78,6 +88,16 @@ jobs:
           toolchain: nightly
           override: true
           components: llvm-tools-preview
+      - name: Configure cache
+        uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: test-coverage-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
       - name: Install grcov
         run: if [[ ! -e ~/.cargo/bin/grcov ]]; then cargo install grcov; fi
       - name: Updating package repo
@@ -90,7 +110,7 @@ jobs:
           RUSTFLAGS: '-C instrument-coverage'
           LLVM_PROFILE_FILE: 'report-%p-%m.profraw'
       - name: Run grcov
-        run: grcov . --binary-path target/debug/deps/ -s . -t lcov --branch --ignore-not-existing --ignore "../**" --ignore "/*" -o coverage.lcov
+        run: grcov . --binary-path target/debug/deps/ -s . -t lcov --branch --ignore-not-existing --ignore "../**" --ignore "/*" --ignore "ui/*" --ignore "target/debug/build/cssparser*" --ignore "target/debug/build/html5ever*" --ignore "target/debug/build/markup5ever*" -o coverage.lcov
       - name: Coveralls upload
         uses: coverallsapp/github-action@master
         with:
