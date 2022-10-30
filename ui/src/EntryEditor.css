@@ -56,6 +56,10 @@
 	flex: 1;
 }
 
+.entry-editor-main #title, .entry-editor-main #username, .entry-editor-main #password, .entry-editor-main #url, .entry-editor-main #notes {
+	font-family: 'IBM Plex Mono';
+}
+
 .generate-menu {
 	padding: 1em 1em;
 	font-size: 0.8em;

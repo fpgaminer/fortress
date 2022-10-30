@@ -128,7 +128,15 @@ function EntryEditor({ entry }: { entry: Entry | null }) {
 				</div>
 				<div className="field">
 					<div className="label">Username</div>
-					<input type="text" id="username" value={username} onChange={(e) => setUsername(e.currentTarget.value)} />
+					<input
+						type="text"
+						id="username"
+						autoComplete="off"
+						spellCheck="false"
+						autoCorrect="off"
+						value={username}
+						onChange={(e) => setUsername(e.currentTarget.value)}
+					/>
 				</div>
 				<div className="field">
 					<div className="label">Password</div>
@@ -149,11 +157,19 @@ function EntryEditor({ entry }: { entry: Entry | null }) {
 				</div>
 				<div className="field">
 					<div className="label">URL</div>
-					<input type="url" id="url" value={url} onChange={(e) => setURL(e.currentTarget.value)} />
+					<input
+						type="url"
+						id="url"
+						autoComplete="off"
+						spellCheck="false"
+						autoCorrect="off"
+						value={url}
+						onChange={(e) => setURL(e.currentTarget.value)}
+					/>
 				</div>
 				<div className="field">
 					<div className="label">Notes</div>
-					<textarea value={notes} onChange={(e) => setNotes(e.currentTarget.value)} />
+					<textarea id="notes" value={notes} onChange={(e) => setNotes(e.currentTarget.value)} />
 				</div>
 			</div>
 			<GenerateMenu state={menu} onClose={onCloseGenerateContextMenu} onGenerate={onGenerate} />

@@ -1,3 +1,10 @@
+@font-face {
+	font-family: 'IBM Plex Mono';
+	font-style: normal;
+	font-weight: 400;
+	src: local(''), url('assets/IBMPlexMono-Regular.ttf') format('truetype');
+}
+
 :root {
 	font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
 	font-size: 16px;
