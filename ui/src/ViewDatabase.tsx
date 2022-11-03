@@ -119,6 +119,16 @@ function ViewDatabase() {
 		onCloseContextMenu();
 	}
 
+	function onCopyUrl() {
+		const entry = database.entries.find((entry) => entry.id === contextMenuEntry);
+
+		if (entry) {
+			void navigator.clipboard.writeText(entry.state.url ?? "");
+		}
+
+		onCloseContextMenu();
+	}
+
 	function onAddEntryClicked() {
 		setAppState({ variant: AppStateVariant.EditEntry, entry: null });
 	}
@@ -201,6 +211,7 @@ function ViewDatabase() {
 						onClose={() => onCloseContextMenu()}
 						onCopyUsername={onCopyUsername}
 						onCopyPassword={onCopyPassword}
+						onCopyUrl={onCopyUrl}
 					/>
 				</div>
 			</div>
@@ -251,11 +262,13 @@ function ContextMenu({
 	onClose,
 	onCopyUsername,
 	onCopyPassword,
+	onCopyUrl,
 }: {
 	state: { x: number; y: number; open: boolean };
 	onClose: () => void;
 	onCopyUsername: () => void;
 	onCopyPassword: () => void;
+	onCopyUrl: () => void;
 }) {
 	const menu = useRef<HTMLElement>(null);
 
@@ -283,6 +296,9 @@ function ContextMenu({
 			</div>
 			<div className="context-menu-item" role="menuitem" tabIndex={-1} onClick={onCopyPassword}>
 				Copy Password
+			</div>
+			<div className="context-menu-item" role="menuitem" tabIndex={-1} onClick={onCopyUrl}>
+				Copy URL
 			</div>
 		</nav>
 	);
