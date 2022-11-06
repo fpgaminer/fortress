@@ -176,7 +176,15 @@ function ViewDatabase() {
 	return (
 		<div className="view-database container">
 			<div className="view-database-header">
-				<input type="search" placeholder="Search..." onChange={onSearchChange} autoFocus />
+				<input
+					type="search"
+					placeholder="Search..."
+					onChange={onSearchChange}
+					autoFocus
+					autoComplete="off"
+					spellCheck="false"
+					autoCorrect="off"
+				/>
 				<button type="button" title="Add Entry" onClick={onAddEntryClicked}>
 					<Icon icon={add24Filled} className="icon" width="24" />
 				</button>
