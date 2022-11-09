@@ -1,19 +1,19 @@
 [package]
 authors = ["fpgaminer"]
 name = "fortress"
-version = "2.2.2"
+version = "2.2.3"
 license = "MIT/Apache-2.0"
 repository = "https://github.com/fpgaminer/fortress"
 description = "Password manager"
 edition = "2021"
 
 [build-dependencies]
-tauri-build = { version = "1.1", features = [] }
+tauri-build = { version = "1.2", features = [] }
 
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-tauri = { version = "1.1", features = ["dialog-all"] }
+tauri = { version = "1.2", features = ["dialog-all"] }
 clap = { version = "4", features = ["derive"] }
 data-encoding = "2.3.2"
 directories = "4.0.1"
