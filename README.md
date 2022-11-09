@@ -20,7 +20,7 @@ A production binary can be built using `cargo tauri build`.
 
 ## Development
 
-During development, the main `fortress` program can be run using `cargo tauri dev -- --no-default-features -- --dir [SOMEPATH]`. It includes hot-reloading.
+During development, the main `fortress` program can be run using `cargo tauri dev -- -- --dir [SOMEPATH]`. It includes hot-reloading.
 
 The `fortresscrypto` crate implements all the crypto stuff unique to Fortress.  `libfortress` implements the bulk of Fortress's functionality.  `fortress` is the main binary, mainly implementing the UI.
 
