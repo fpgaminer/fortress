@@ -159,7 +159,7 @@ fn create_database(username: String, password: String, state: tauri::State<AppSt
 
 #[tauri::command]
 fn unlock_database(password: String, state: tauri::State<AppState>) -> Result<(), String> {
-	match Database::load_from_path(&state.database_path, &password) {
+	match Database::load_from_path(&state.database_path, password) {
 		Ok(database) => {
 			*state.database.lock().unwrap() = Some(database);
 			Ok(())
