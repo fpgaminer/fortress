@@ -30,7 +30,7 @@ impl std::fmt::Display for CryptoError {
 			CryptoError::DecryptionError => write!(f, "Decryption error"),
 			CryptoError::TruncatedData => write!(f, "Truncated data"),
 			CryptoError::BadScryptParameters => write!(f, "Bad Scrypt parameters"),
-			CryptoError::IOError(e) => write!(f, "IO error: {}", e),
+			CryptoError::IOError(e) => write!(f, "IO error: {e}"),
 			CryptoError::BadChecksum => write!(f, "Bad checksum"),
 			CryptoError::UnsupportedVersion => write!(f, "Unsupported version"),
 		}

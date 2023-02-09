@@ -159,7 +159,7 @@ impl Database {
 
 	pub fn get_entry_by_id(&self, id: &ID) -> Option<&Entry> {
 		match self.objects.get(id)? {
-			&DatabaseObject::Entry(ref entry) => Some(entry),
+			DatabaseObject::Entry(entry) => Some(entry),
 			_ => None,
 		}
 	}
@@ -173,7 +173,7 @@ impl Database {
 
 	pub fn get_directory_by_id(&self, id: &ID) -> Option<&Directory> {
 		match self.objects.get(id)? {
-			&DatabaseObject::Directory(ref dir) => Some(dir),
+			DatabaseObject::Directory(dir) => Some(dir),
 			_ => None,
 		}
 	}
@@ -524,8 +524,8 @@ impl From<reqwest::Error> for ApiError {
 impl std::fmt::Display for ApiError {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
-			ApiError::ReqwestError(err) => write!(f, "Reqwest error: {}", err),
-			ApiError::ApiError(_, err) => write!(f, "API error: {}", err),
+			ApiError::ReqwestError(err) => write!(f, "Reqwest error: {err}"),
+			ApiError::ApiError(_, err) => write!(f, "API error: {err}"),
 		}
 	}
 }

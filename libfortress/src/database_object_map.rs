@@ -51,12 +51,12 @@ impl DatabaseObjectMap {
 	/// NOTE: Does not allow you to overwrite an existing object if that operation would be destructive (e.g. older version, conflicting history, etc).
 	pub fn update(&mut self, object: DatabaseObject) {
 		match (self.inner.get(object.get_id()), &object) {
-			(Some(&DatabaseObject::Entry(ref existing)), &DatabaseObject::Entry(ref new_object)) => {
+			(Some(DatabaseObject::Entry(existing)), DatabaseObject::Entry(new_object)) => {
 				if !existing.safe_to_replace_with(new_object) {
 					panic!("Attempted to overwrite an existing DatabaseObject with an older version.");
 				}
 			},
-			(Some(&DatabaseObject::Directory(ref existing)), &DatabaseObject::Directory(ref new_object)) => {
+			(Some(DatabaseObject::Directory(existing)), DatabaseObject::Directory(new_object)) => {
 				if !existing.safe_to_replace_with(new_object) {
 					panic!("Attempted to overwrite an existing DatabaseObject with an older version.");
 				}
