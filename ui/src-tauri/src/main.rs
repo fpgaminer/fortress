@@ -74,7 +74,7 @@ fn main() {
 	fs::create_dir_all(&data_dir).expect("Failed to create data directory");
 
 	if !data_dir.is_dir() {
-		eprintln!("'{:?}' is not a directory.", data_dir);
+		eprintln!("'{data_dir:?}' is not a directory.");
 		return;
 	}
 
@@ -120,7 +120,7 @@ fn format_fortress_error(err: FortressError) -> String {
 	match err {
 		FortressError::CryptoError(CryptoError::DecryptionError) => "Incorrect password.".to_owned(),
 		FortressError::CryptoError(CryptoError::BadChecksum) => "File is corrupted.".to_owned(),
-		err => format!("{}", err),
+		err => format!("{err}"),
 	}
 }
 

@@ -46,11 +46,11 @@ impl std::error::Error for FortressError {}
 impl std::fmt::Display for FortressError {
 	fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
 		match self {
-			FortressError::IOError(e) => write!(f, "IO error: {}", e),
-			FortressError::CryptoError(e) => write!(f, "Cryptography error: {}", e),
-			FortressError::SerializationError(e) => write!(f, "Serialization error: {}", e),
+			FortressError::IOError(e) => write!(f, "IO error: {e}"),
+			FortressError::CryptoError(e) => write!(f, "Cryptography error: {e}"),
+			FortressError::SerializationError(e) => write!(f, "Serialization error: {e}"),
 			FortressError::SyncBadUrl => write!(f, "Bad Sync URL"),
-			FortressError::SyncApiError(e) => write!(f, "Sync API error: {}", e),
+			FortressError::SyncApiError(e) => write!(f, "Sync API error: {e}"),
 			FortressError::SyncInconsistentServer => write!(f, "Sync server is inconsistent"),
 			FortressError::SyncConflict => write!(f, "Sync Conflict"),
 		}
