@@ -79,7 +79,7 @@ impl NetworkKeySuite {
 		// Hide username behind hmac so salt is unique to this application.
 		let salt = &hmac_512(&NETWORK_USERNAME_SALT, username).into_bytes()[..32];
 		let mut raw_keys = [0u8; 256 + 32];
-		let scrypt_params = scrypt::Params::new(NETWORK_SCRYPT_LOG_N, NETWORK_SCRYPT_R, NETWORK_SCRYPT_P).expect("scrypt parameters should be valid");
+		let scrypt_params = scrypt::Params::new(NETWORK_SCRYPT_LOG_N, NETWORK_SCRYPT_R, NETWORK_SCRYPT_P, 32).expect("scrypt parameters should be valid");
 		scrypt::scrypt(password, salt, &scrypt_params, &mut raw_keys).expect("internal error");
 
 		let (siv_keys, raw_keys) = raw_keys.split_at(256);
@@ -115,7 +115,7 @@ impl FileKeySuite {
 	pub fn derive(password: &[u8], params: &FileKdfParameters) -> Result<FileKeySuite, CryptoError> {
 		let mut raw_keys = [0u8; 256];
 
-		let scrypt_params = scrypt::Params::new(params.log_n, params.r, params.p).map_err(|_| CryptoError::BadScryptParameters)?;
+		let scrypt_params = scrypt::Params::new(params.log_n, params.r, params.p, 32).map_err(|_| CryptoError::BadScryptParameters)?;
 		scrypt::scrypt(password, &params.salt, &scrypt_params, &mut raw_keys).expect("internal error");
 
 		Ok(FileKeySuite {
