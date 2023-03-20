@@ -16,7 +16,7 @@ serde = { version = "1.0", features = ["derive"] }
 tauri = { version = "1.2", features = ["dialog-all"] }
 clap = { version = "4", features = ["derive"] }
 data-encoding = "2.3.3"
-directories = "4.0.1"
+directories = "5.0.0"
 libfortress = { version = "2", path = "../../libfortress" }
 url = "2"
 
