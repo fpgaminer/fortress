@@ -28,8 +28,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 macro_rules! newtype_clone (($newtype:ident) => (
         impl Clone for $newtype {
             fn clone(&self) -> $newtype {
-                let &$newtype(v) = self;
-                $newtype(v)
+                *self
             }
         }
 
@@ -197,7 +196,7 @@ macro_rules! public_newtype_traits (($newtype:ident) => (
         #[inline]
         fn partial_cmp(&self,
                        other: &$newtype) -> Option<::std::cmp::Ordering> {
-            ::std::cmp::PartialOrd::partial_cmp(self.as_ref(), other.as_ref())
+            Some(self.cmp(other))
         }
         #[inline]
         fn lt(&self, other: &$newtype) -> bool {
@@ -237,7 +236,12 @@ macro_rules! new_type {
         $(#[$meta])*
         #[must_use]
         pub struct $name(pub [u8; $bytes]);
-        newtype_clone!($name);
+        impl Clone for $name {
+            fn clone(&self) -> $name {
+                let &$name(v) = self;
+                $name(v)
+            }
+        }
         newtype_traits!($name, $bytes);
         impl $name {
             newtype_from_slice!($name, $bytes);
