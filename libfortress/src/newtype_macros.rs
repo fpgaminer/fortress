@@ -26,7 +26,7 @@ WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
 macro_rules! newtype_clone (($newtype:ident) => (
-        #[allow(clippy::incorrect_clone_impl_on_copy_type)]
+        #[allow(clippy::non_canonical_clone_impl)]
         impl Clone for $newtype {
             fn clone(&self) -> $newtype {
                 *self
