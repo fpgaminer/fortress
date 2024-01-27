@@ -31,7 +31,7 @@ jobs:
           toolchain: stable
           override: true
       - name: Configure cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
@@ -89,7 +89,7 @@ jobs:
           override: true
           components: llvm-tools-preview
       - name: Configure cache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/
