@@ -4,7 +4,7 @@ mod entry;
 use serde::{Deserialize, Serialize};
 
 pub use self::{
-	directory::{Directory, DirectoryHistoryAction},
+	directory::Directory,
 	entry::{Entry, EntryHistory},
 };
 
