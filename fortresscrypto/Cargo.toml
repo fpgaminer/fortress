@@ -10,7 +10,7 @@ edition = "2021"
 [dependencies]
 byteorder = "1"
 rand = { version = "0.8.5", features = ["std"] }
-data-encoding = "2.5.0"
+data-encoding = "2.6.0"
 serde = { version = "1", features = ["derive"] }
 password-hash = "0.5.0"
 scrypt = { version = "0.11.0", default-features = false }
