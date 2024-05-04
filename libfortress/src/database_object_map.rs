@@ -27,17 +27,17 @@ impl DatabaseObjectMap {
 		DatabaseObjectMap { inner: HashMap::new() }
 	}
 
-	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&DatabaseObject>
+	pub fn get<Q>(&self, key: &Q) -> Option<&DatabaseObject>
 	where
-		Q: Hash + Eq,
+		Q: Hash + Eq + ?Sized,
 		ID: Borrow<Q>,
 	{
 		self.inner.get(key)
 	}
 
-	pub fn get_mut<Q: ?Sized>(&mut self, key: &Q) -> Option<&mut DatabaseObject>
+	pub fn get_mut<Q>(&mut self, key: &Q) -> Option<&mut DatabaseObject>
 	where
-		Q: Hash + Eq,
+		Q: Hash + Eq + ?Sized,
 		ID: Borrow<Q>,
 	{
 		self.inner.get_mut(key)
