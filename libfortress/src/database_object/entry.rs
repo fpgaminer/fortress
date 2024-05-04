@@ -63,9 +63,9 @@ impl Entry {
 		&self.state
 	}
 
-	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&String>
+	pub fn get<Q>(&self, key: &Q) -> Option<&String>
 	where
-		Q: Hash + Eq,
+		Q: Hash + Eq + ?Sized,
 		String: Borrow<Q>,
 	{
 		self.state.get(key)
@@ -185,9 +185,9 @@ impl EntryHistory {
 		EntryHistory { time: unix_timestamp(), data }
 	}
 
-	pub fn get<Q: ?Sized>(&self, key: &Q) -> Option<&String>
+	pub fn get<Q>(&self, key: &Q) -> Option<&String>
 	where
-		Q: Hash + Eq,
+		Q: Hash + Eq + ?Sized,
 		String: Borrow<Q>,
 	{
 		self.data.get(key)
