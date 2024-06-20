@@ -39,7 +39,7 @@ impl Entry {
 
 		for history_item in &history {
 			// History must be ordered
-			if history_item.time < min_next_timestamp || history_item.time == <u64>::max_value() {
+			if history_item.time < min_next_timestamp || history_item.time == <u64>::MAX {
 				return None;
 			}
 			min_next_timestamp = history_item.time + 1;
