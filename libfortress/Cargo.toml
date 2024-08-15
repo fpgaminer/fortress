@@ -17,5 +17,5 @@ tempfile = "3.10.1"
 reqwest = { version = "0.12", features = ["default-tls", "blocking", "json" ] }
 tiny_http = "0.12"
 fortresscrypto = { version = "2", path = "../fortresscrypto" }
-subtle = "2.6.0"
+subtle = "2.6.1"
 url = { version = "2", features = ["serde"] }
