@@ -140,7 +140,7 @@ impl Entry {
 	}
 }
 
-impl<'a, Q: ?Sized> Index<&'a Q> for Entry
+impl<Q: ?Sized> Index<&Q> for Entry
 where
 	Q: Eq + Hash,
 	String: Borrow<Q>,
@@ -194,7 +194,7 @@ impl EntryHistory {
 	}
 }
 
-impl<'a, Q: ?Sized> Index<&'a Q> for EntryHistory
+impl<Q: ?Sized> Index<&Q> for EntryHistory
 where
 	Q: Eq + Hash,
 	String: Borrow<Q>,

@@ -160,7 +160,7 @@ impl Directory {
 	}
 
 	/// List all Directory entries in this directory.
-	pub fn list_directories<'a>(&'a self, database: &'a Database) -> impl Iterator<Item = &'a ID> + '_ {
+	pub fn list_directories<'a>(&'a self, database: &'a Database) -> impl Iterator<Item = &'a ID> + 'a {
 		self.entries.iter().filter(|id| database.get_directory_by_id(id).is_some())
 	}
 
