@@ -6,7 +6,7 @@ mod siv;
 use byteorder::{LittleEndian, ReadBytesExt};
 pub use error::CryptoError;
 use hmac::{digest::CtOutput, Hmac, Mac};
-use rand::{rngs::OsRng, Rng};
+use rand::{rngs::OsRng, Rng, TryRngCore};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha512};
 use siv::SivEncryptionKeys;
@@ -263,7 +263,7 @@ impl Default for FileKdfParameters {
 			log_n: if cfg!(debug_assertions) { 8 } else { 18 },
 			r: 8,
 			p: 1,
-			salt: OsRng.gen(),
+			salt: OsRng.unwrap_err().random(),
 		}
 	}
 }
@@ -272,7 +272,7 @@ impl Default for FileKdfParameters {
 #[cfg(test)]
 mod tests {
 	use super::{calculate_checksum, decrypt_from_file, encrypt_to_file, FileKeySuite, NetworkKeySuite};
-	use rand::{rngs::OsRng, seq::SliceRandom, Rng};
+	use rand::{rngs::OsRng, seq::IndexedMutRandom, Rng, TryRngCore};
 	use std::io::Cursor;
 
 	// Basic santiy checks on NetworkKeySuite (the underlying SIV encryption is tested in the siv module)
@@ -287,9 +287,9 @@ mod tests {
 		assert_ne!(keys, bad_keys);
 
 		// Encrypt and decrypt
-		let plaintext = (0..2017).map(|_| OsRng.gen()).collect::<Vec<u8>>();
-		let id: [u8; 32] = OsRng.gen();
-		let bad_id: [u8; 32] = OsRng.gen();
+		let plaintext = (0..2017).map(|_| OsRng.unwrap_err().random()).collect::<Vec<u8>>();
+		let id: [u8; 32] = OsRng.unwrap_err().random();
+		let bad_id: [u8; 32] = OsRng.unwrap_err().random();
 		let ciphertext = keys.encrypt_object(&id, &plaintext);
 
 		assert_eq!(plaintext, keys.decrypt_object(&id, &ciphertext).unwrap());
@@ -316,7 +316,7 @@ mod tests {
 		assert_ne!(keys, bad_keys);
 
 		// Encrypt and decrypt
-		let plaintext = (0..2017).map(|_| OsRng.gen()).collect::<Vec<u8>>();
+		let plaintext = (0..2017).map(|_| OsRng.unwrap_err().random()).collect::<Vec<u8>>();
 		let ciphertext = keys.encrypt_object(&plaintext);
 
 		assert_eq!(plaintext, keys.decrypt_object(&ciphertext).unwrap());
@@ -344,12 +344,12 @@ mod tests {
 
 		// Run tests a few times (they're random)
 		for _ in 0..64 {
-			let mutation_byte: u8 = OsRng.gen();
+			let mutation_byte: u8 = OsRng.unwrap_err().random();
 
-			let truncated = &encrypted_data[..encrypted_data.len() - OsRng.gen_range(1..encrypted_data.len())];
+			let truncated = &encrypted_data[..encrypted_data.len() - OsRng.unwrap_err().random_range(1..encrypted_data.len())];
 			let corrupted_checksum = {
 				let mut buffer = encrypted_data.clone();
-				buffer.choose_mut(&mut OsRng).map(|x| *x ^= mutation_byte);
+				buffer.choose_mut(&mut OsRng.unwrap_err()).map(|x| *x ^= mutation_byte);
 				buffer
 			};
 			let corrupted_mac = {
@@ -358,7 +358,7 @@ mod tests {
 				// This is because it might mutate the scrypt parameters to absurd values, which
 				// can cause the library to spin forever during tests.
 				// TODO: This isn't ideal as we'd like to test corrupting those bits too, but not sure how.
-				data[32..].choose_mut(&mut OsRng).map(|x| *x ^= mutation_byte);
+				data[32..].choose_mut(&mut OsRng.unwrap_err()).map(|x| *x ^= mutation_byte);
 				let checksum = calculate_checksum([&data]);
 				data.extend_from_slice(&checksum);
 				data

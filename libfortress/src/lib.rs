@@ -35,7 +35,7 @@ use crate::{database_object::DatabaseObject, database_object_map::DatabaseObject
 pub use errors::FortressError;
 pub use fortresscrypto;
 use fortresscrypto::{EncryptedObject, FileKeySuite, LoginId, LoginKey, SIV};
-use rand::{rngs::OsRng, seq::SliceRandom, Rng};
+use rand::{rngs::OsRng, seq::IndexedRandom, Rng, TryRngCore};
 use reqwest::{IntoUrl, Method};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -586,7 +586,7 @@ pub fn random_string(length: usize, uppercase: bool, lowercase: bool, numbers: b
 	let mut result = String::new();
 
 	for _ in 0..length {
-		result.push(*alphabet.choose(&mut OsRng).expect("internal error"));
+		result.push(*alphabet.choose(&mut OsRng.unwrap_err()).expect("internal error"));
 	}
 
 	result
@@ -611,9 +611,10 @@ fn unix_timestamp() -> u64 {
 mod tests {
 	use super::{random_string, Database, DatabaseObject, Directory, Entry, EntryHistory, ID};
 	use rand::{
-		distributions::{uniform::SampleRange, Standard},
+		distr::{uniform::SampleRange, StandardUniform},
+		rng,
 		rngs::OsRng,
-		thread_rng, Rng,
+		Rng, TryRngCore,
 	};
 	use std::{collections::HashMap, io::Cursor};
 	use tempfile::tempdir;
@@ -623,13 +624,13 @@ mod tests {
 	}
 
 	pub(crate) fn random_uniform_string<R: SampleRange<usize>>(range: R) -> String {
-		thread_rng().sample_iter::<char, _>(Standard).take(thread_rng().gen_range(range)).collect()
+		rng().sample_iter::<char, _>(StandardUniform).take(rng().random_range(range)).collect()
 	}
 
 	#[test]
 	fn encrypt_then_decrypt() {
-		let password_len = OsRng.gen_range(0..64);
-		let password: String = (0..password_len).map(|_| OsRng.gen::<char>()).collect();
+		let password_len = OsRng.unwrap_err().random_range(0..64);
+		let password: String = (0..password_len).map(|_| OsRng.unwrap_err().random::<char>()).collect();
 		let tmp_dir = tempdir().unwrap();
 
 		let mut db = Database::new_with_password("username", &password);
@@ -753,26 +754,26 @@ mod tests {
 		let tmp_dir = tempdir().unwrap();
 
 		// Unicode in username and password
-		let username: String = (0..256).map(|_| OsRng.gen::<char>()).collect();
-		let password: String = (0..256).map(|_| OsRng.gen::<char>()).collect();
+		let username: String = (0..256).map(|_| OsRng.unwrap_err().random::<char>()).collect();
+		let password: String = (0..256).map(|_| OsRng.unwrap_err().random::<char>()).collect();
 		let mut db = Database::new_with_password(&username, &password);
 
 		// Unicode in entries
-		let a: String = (0..256).map(|_| OsRng.gen::<char>()).collect();
-		let b: String = (0..256).map(|_| OsRng.gen::<char>()).collect();
-		let c: String = (0..256).map(|_| OsRng.gen::<char>()).collect();
+		let a: String = (0..256).map(|_| OsRng.unwrap_err().random::<char>()).collect();
+		let b: String = (0..256).map(|_| OsRng.unwrap_err().random::<char>()).collect();
+		let c: String = (0..256).map(|_| OsRng.unwrap_err().random::<char>()).collect();
 
 		let mut entry = Entry::new();
 		entry.edit(EntryHistory::new(HashMap::new()));
 		entry.edit(EntryHistory::new(
 			[
 				(
-					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
-					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
+					(0..256).map(|_| OsRng.unwrap_err().random::<char>()).collect::<String>(),
+					(0..256).map(|_| OsRng.unwrap_err().random::<char>()).collect::<String>(),
 				),
 				(
-					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
-					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
+					(0..256).map(|_| OsRng.unwrap_err().random::<char>()).collect::<String>(),
+					(0..256).map(|_| OsRng.unwrap_err().random::<char>()).collect::<String>(),
 				),
 				(a.clone(), b.clone()),
 			]
@@ -783,16 +784,16 @@ mod tests {
 		entry.edit(EntryHistory::new(
 			[
 				(
-					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
-					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
+					(0..256).map(|_| OsRng.unwrap_err().random::<char>()).collect::<String>(),
+					(0..256).map(|_| OsRng.unwrap_err().random::<char>()).collect::<String>(),
 				),
 				(
-					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
-					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
+					(0..256).map(|_| OsRng.unwrap_err().random::<char>()).collect::<String>(),
+					(0..256).map(|_| OsRng.unwrap_err().random::<char>()).collect::<String>(),
 				),
 				(
-					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
-					(0..256).map(|_| OsRng.gen::<char>()).collect::<String>(),
+					(0..256).map(|_| OsRng.unwrap_err().random::<char>()).collect::<String>(),
+					(0..256).map(|_| OsRng.unwrap_err().random::<char>()).collect::<String>(),
 				),
 				(a.clone(), c.clone()),
 			]
@@ -1003,9 +1004,9 @@ mod tests {
 		// Create directory
 		let mut directory = Directory::new();
 
-		let id1: ID = OsRng.gen();
-		let id2: ID = OsRng.gen();
-		let id3: ID = OsRng.gen();
+		let id1: ID = OsRng.unwrap_err().random();
+		let id2: ID = OsRng.unwrap_err().random();
+		let id3: ID = OsRng.unwrap_err().random();
 
 		directory.add(id1.clone());
 		quick_sleep();

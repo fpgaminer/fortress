@@ -88,16 +88,16 @@ impl SivEncryptionKeys {
 #[cfg(test)]
 mod tests {
 	use crate::siv::SivEncryptionKeys;
-	use rand::{rngs::OsRng, seq::SliceRandom, Rng};
+	use rand::{rngs::OsRng, seq::IndexedMutRandom, Rng, TryRngCore};
 
 	// Test that the encryption functions are deterministic
 	#[test]
 	fn test_deterministic_encryption() {
-		let id: [u8; 32] = OsRng.gen();
-		let data = (0..1034).map(|_| OsRng.gen()).collect::<Vec<u8>>();
+		let id: [u8; 32] = OsRng.unwrap_err().random();
+		let data = (0..1034).map(|_| OsRng.unwrap_err().random()).collect::<Vec<u8>>();
 		let keys = SivEncryptionKeys {
-			siv_key: OsRng.gen(),
-			cipher_key: OsRng.gen(),
+			siv_key: OsRng.unwrap_err().random(),
+			cipher_key: OsRng.unwrap_err().random(),
 		};
 
 		let (siv1, ciphertext1) = keys.encrypt(&id, &data);
@@ -113,12 +113,12 @@ mod tests {
 	// Test that the encryption functions use different keys for different inputs
 	#[test]
 	fn test_different_keys() {
-		let id1: [u8; 32] = OsRng.gen();
-		let id2: [u8; 32] = OsRng.gen();
-		let data = (0..1034).map(|_| OsRng.gen()).collect::<Vec<u8>>();
+		let id1: [u8; 32] = OsRng.unwrap_err().random();
+		let id2: [u8; 32] = OsRng.unwrap_err().random();
+		let data = (0..1034).map(|_| OsRng.unwrap_err().random()).collect::<Vec<u8>>();
 		let keys = SivEncryptionKeys {
-			siv_key: OsRng.gen(),
-			cipher_key: OsRng.gen(),
+			siv_key: OsRng.unwrap_err().random(),
+			cipher_key: OsRng.unwrap_err().random(),
 		};
 
 		let (siv1, ciphertext1) = keys.encrypt(&id1, &data);
@@ -142,34 +142,34 @@ mod tests {
 	// Make sure it is verifying integrity of the ciphertext
 	#[test]
 	fn test_integrity() {
-		let id: [u8; 32] = OsRng.gen();
-		let data = (0..1034).map(|_| OsRng.gen()).collect::<Vec<u8>>();
+		let id: [u8; 32] = OsRng.unwrap_err().random();
+		let data = (0..1034).map(|_| OsRng.unwrap_err().random()).collect::<Vec<u8>>();
 		let keys = SivEncryptionKeys {
-			siv_key: OsRng.gen(),
-			cipher_key: OsRng.gen(),
+			siv_key: OsRng.unwrap_err().random(),
+			cipher_key: OsRng.unwrap_err().random(),
 		};
 
 		let (siv, mut ciphertext) = keys.encrypt(&id, &data);
 
 		// Make sure it is verifying the ciphertext
-		*ciphertext.choose_mut(&mut OsRng).unwrap() ^= 1;
+		*ciphertext.choose_mut(&mut OsRng.unwrap_err()).unwrap() ^= 1;
 		assert!(keys.decrypt(&id, &siv, &ciphertext).is_none());
 
 		// Make sure it is verifying the siv
 		let mut siv2 = siv.clone();
-		*siv2.0.choose_mut(&mut OsRng).unwrap() ^= 1;
+		*siv2.0.choose_mut(&mut OsRng.unwrap_err()).unwrap() ^= 1;
 		assert!(keys.decrypt(&id, &siv2, &ciphertext).is_none());
 	}
 
 	// Make sure it is verifying the id
 	#[test]
 	fn test_id() {
-		let id: [u8; 32] = OsRng.gen();
-		let bad_id: [u8; 32] = OsRng.gen();
-		let data = (0..1034).map(|_| OsRng.gen()).collect::<Vec<u8>>();
+		let id: [u8; 32] = OsRng.unwrap_err().random();
+		let bad_id: [u8; 32] = OsRng.unwrap_err().random();
+		let data = (0..1034).map(|_| OsRng.unwrap_err().random()).collect::<Vec<u8>>();
 		let keys = SivEncryptionKeys {
-			siv_key: OsRng.gen(),
-			cipher_key: OsRng.gen(),
+			siv_key: OsRng.unwrap_err().random(),
+			cipher_key: OsRng.unwrap_err().random(),
 		};
 
 		let (siv, ciphertext) = keys.encrypt(&id, &data);

@@ -70,7 +70,7 @@ macro_rules! newtype_from_slice (($newtype:ident, $len:expr) => (
 ));
 
 macro_rules! newtype_traits (($newtype:ident, $len:expr) => (
-	impl ::rand::distributions::Distribution<$newtype> for ::rand::distributions::Standard {
+	impl ::rand::distr::Distribution<$newtype> for ::rand::distr::StandardUniform {
 		fn sample<R: ::rand::Rng + ?Sized>(&self, rng: &mut R) -> $newtype {
 			$newtype::from_rng(rng)
 		}
