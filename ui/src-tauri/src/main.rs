@@ -10,8 +10,8 @@ use std::{
 
 use clap::{Parser, Subcommand};
 use libfortress::{fortresscrypto::CryptoError, Database, Directory, Entry, EntryHistory, FortressError, ID};
+use tauri_plugin_dialog::DialogExt;
 use url::Url;
-
 
 #[derive(Parser, Debug)]
 #[clap(version, about, long_about = None, subcommand_negates_reqs = true)]
@@ -85,6 +85,7 @@ fn main() {
 	};
 
 	tauri::Builder::default()
+		.plugin(tauri_plugin_dialog::init())
 		.manage(appstate)
 		.invoke_handler(tauri::generate_handler![
 			database_exists,
@@ -126,8 +127,8 @@ fn format_fortress_error(err: FortressError) -> String {
 
 
 #[tauri::command]
-fn error_dialog(message: String, window: tauri::Window) {
-	tauri::api::dialog::message(Some(&window), "Error", message)
+fn error_dialog(message: String, app_handle: tauri::AppHandle) {
+	app_handle.dialog().message(message).title("Error").show(|_| {});
 }
 
 
