@@ -56,8 +56,12 @@
 	flex: 1;
 }
 
-.entry-editor-main #title, .entry-editor-main #username, .entry-editor-main #password, .entry-editor-main #url, .entry-editor-main #notes {
-	font-family: 'IBM Plex Mono';
+.entry-editor-main #title,
+.entry-editor-main #username,
+.entry-editor-main #password,
+.entry-editor-main #url,
+.entry-editor-main #notes {
+	font-family: "IBM Plex Mono";
 }
 
 .generate-menu {
@@ -67,7 +71,7 @@
 	position: absolute;
 	background-color: #ffffff;
 	border: 1px solid #566674;
-	border-radius: .25rem;
+	border-radius: 0.25rem;
 	color: #0f0f0f;
 	margin: 2px 0 0;
 	min-width: 160px;
@@ -77,7 +81,7 @@
 	transition: opacity 250ms ease !important;
 }
 
-.generate-menu input+label {
+.generate-menu input + label {
 	padding-left: 0.4em;
 }
 

@@ -33,7 +33,7 @@ function sortDirectories(directories: Directory[]) {
 function filterEntriesByDirectory(
 	entries: Entry[],
 	directories: Directory[],
-	selectedDirectory: string | DirectoryItemVariant.All
+	selectedDirectory: string | DirectoryItemVariant.All,
 ) {
 	if (selectedDirectory === DirectoryItemVariant.All) {
 		return entries.slice();
@@ -166,7 +166,7 @@ function ViewDatabase() {
 	}
 
 	const entries_filtered = sortEntries(
-		filterEntriesBySearch(filterEntriesByDirectory(database.entries, database.directories, selectedDirectory), search)
+		filterEntriesBySearch(filterEntriesByDirectory(database.entries, database.directories, selectedDirectory), search),
 	);
 
 	const ents = entries_filtered.map((ent) => (
