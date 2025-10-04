@@ -54,7 +54,7 @@ function EntryEditor({ entry }: { entry: Entry | null }) {
 					url: url,
 					notes: notes,
 				},
-				parentId
+				parentId,
 			);
 		} catch (e) {
 			// TODO: This is a fatal error.  We should use a different dialog that allows the user to try and save again, or quit the application.

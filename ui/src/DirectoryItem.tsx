@@ -128,10 +128,10 @@ function DirectoryItem(props: DirectoryItemProps) {
 			: "");
 	const name =
 		props.variant === DirectoryItemVariant.Directory
-			? props.directory.name ?? ""
+			? (props.directory.name ?? "")
 			: props.variant === DirectoryItemVariant.All
-			? "All"
-			: "";
+				? "All"
+				: "";
 
 	return (
 		<div className={className} onDrop={onDrop} onDragOver={allowDrop} onClick={onClick} onDoubleClick={onDoubleClick}>

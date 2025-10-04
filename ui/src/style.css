@@ -1,8 +1,10 @@
 @font-face {
-	font-family: 'IBM Plex Mono';
+	font-family: "IBM Plex Mono";
 	font-style: normal;
 	font-weight: 400;
-	src: local(''), url('assets/IBMPlexMono-Regular.ttf') format('truetype');
+	src:
+		local(""),
+		url("assets/IBMPlexMono-Regular.ttf") format("truetype");
 }
 
 :root {
@@ -29,7 +31,8 @@ body {
 	overflow: hidden;
 }
 
-#root, .app {
+#root,
+.app {
 	height: 100%;
 	overflow: hidden;
 }
@@ -126,7 +129,7 @@ button {
 	position: absolute;
 	background-color: #ffffff;
 	border: 1px solid #566674;
-	border-radius: .25rem;
+	border-radius: 0.25rem;
 	color: #0f0f0f;
 	margin: 2px 0 0;
 	min-width: 160px;
@@ -161,14 +164,14 @@ html {
 	animation-name: spin;
 	animation-duration: 2000ms;
 	animation-iteration-count: infinite;
-	animation-timing-function: linear; 
+	animation-timing-function: linear;
 }
-  
+
 @keyframes spin {
 	from {
-		transform:rotate(0deg);
+		transform: rotate(0deg);
 	}
 	to {
-		transform:rotate(360deg);
+		transform: rotate(360deg);
 	}
 }

@@ -1,39 +1,38 @@
 {
-  "name": "fortress",
-  "private": true,
-  "version": "2.2.3",
-  "type": "module",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
-    "tauri": "tauri",
-    "format": "prettier --check .",
-    "format:fix": "prettier --write ."
-  },
-  "dependencies": {
-    "@tauri-apps/api": "^2.8.0",
-    "@tauri-apps/plugin-dialog": "^2.4.0",
-    "react": "^19.2.0",
-    "react-dom": "^19.2.0",
-    "recoil": "^0.7.7"
-  },
-  "devDependencies": {
-    "@iconify/icons-fluent": "^1.2.38",
-    "@iconify/react": "^6.0.2",
-    "@tauri-apps/cli": "^2.8.4",
-    "@types/node": "^24.6.2",
-    "@types/react": "^19.2.0",
-    "@types/react-dom": "^19.2.0",
-    "@typescript-eslint/eslint-plugin": "^8.45.0",
-    "@typescript-eslint/parser": "^8.45.0",
-    "@vitejs/plugin-react": "^5.0.4",
-    "eslint": "^9.37.0",
-    "eslint-config-prettier": "^10.1.8",
-    "eslint-plugin-react": "^7.37.5",
-    "eslint-plugin-react-hooks": "^6.1.0",
-    "prettier": "^3.6.2",
-    "typescript": "^5.9.3",
-    "vite": "^7.1.9"
-  }
+	"name": "fortress",
+	"private": true,
+	"version": "2.2.3",
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "tsc && vite build",
+		"preview": "vite preview",
+		"tauri": "tauri",
+		"format": "prettier --check .",
+		"format:fix": "prettier --write ."
+	},
+	"dependencies": {
+		"@tauri-apps/api": "^2.8.0",
+		"react": "^19.2.0",
+		"react-dom": "^19.2.0",
+		"recoil": "^0.7.7"
+	},
+	"devDependencies": {
+		"@iconify/icons-fluent": "^1.2.38",
+		"@iconify/react": "^6.0.2",
+		"@tauri-apps/cli": "^2.8.4",
+		"@types/node": "^24.6.2",
+		"@types/react": "^19.2.0",
+		"@types/react-dom": "^19.2.0",
+		"@typescript-eslint/eslint-plugin": "^8.45.0",
+		"@typescript-eslint/parser": "^8.45.0",
+		"@vitejs/plugin-react-swc": "^4.1.0",
+		"eslint": "^9.37.0",
+		"eslint-config-prettier": "^10.1.8",
+		"eslint-plugin-react": "^7.37.5",
+		"eslint-plugin-react-hooks": "^6.1.0",
+		"prettier": "^3.6.2",
+		"typescript": "^5.9.3",
+		"vite": "^7.1.9"
+	}
 }

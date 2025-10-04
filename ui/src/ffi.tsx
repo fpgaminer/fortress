@@ -58,7 +58,7 @@ export async function randomString(
 	uppercase: boolean,
 	lowercase: boolean,
 	numbers: boolean,
-	others: string
+	others: string,
 ): Promise<string> {
 	return await invoke("random_string", { length, uppercase, lowercase, numbers, others });
 }
