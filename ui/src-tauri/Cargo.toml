@@ -13,7 +13,7 @@ tauri-build = { version = "2.4.1", features = [] }
 [dependencies]
 serde_json = "1.0.145"
 serde = { version = "1.0.228", features = ["derive"] }
-tauri = { version = "2.8.5", features = [] }
+tauri = { version = "2.9.0", features = [] }
 clap = { version = "4.5.48", features = ["derive"] }
 data-encoding = "2.9.0"
 directories = "6.0.0"
