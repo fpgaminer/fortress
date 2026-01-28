@@ -19,7 +19,7 @@ data-encoding = "2.9.0"
 directories = "6.0.0"
 libfortress = { version = "2", path = "../../libfortress" }
 url = "2.5.7"
-tauri-plugin-dialog = "2.4.0"
+tauri-plugin-dialog = "2.4.2"
 
 [features]
 # by default Tauri runs in production mode
