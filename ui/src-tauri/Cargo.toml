@@ -14,7 +14,7 @@ tauri-build = { version = "2.5.0", features = [] }
 serde_json = "1.0.145"
 serde = { version = "1.0.228", features = ["derive"] }
 tauri = { version = "2.9.0", features = [] }
-clap = { version = "4.5.48", features = ["derive"] }
+clap = { version = "4.5.55", features = ["derive"] }
 data-encoding = "2.9.0"
 directories = "6.0.0"
 libfortress = { version = "2", path = "../../libfortress" }
