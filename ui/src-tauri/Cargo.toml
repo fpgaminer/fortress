@@ -15,7 +15,7 @@ serde_json = "1.0.149"
 serde = { version = "1.0.228", features = ["derive"] }
 tauri = { version = "2.9.0", features = [] }
 clap = { version = "4.5.55", features = ["derive"] }
-data-encoding = "2.9.0"
+data-encoding = "2.10.0"
 directories = "6.0.0"
 libfortress = { version = "2", path = "../../libfortress" }
 url = "2.5.8"
