@@ -11,15 +11,15 @@ edition = "2021"
 tauri-build = { version = "2.5.0", features = [] }
 
 [dependencies]
-serde_json = "1.0.149"
-serde = { version = "1.0.228", features = ["derive"] }
-tauri = { version = "2.9.0", features = [] }
-clap = { version = "4.5.55", features = ["derive"] }
-data-encoding = "2.10.0"
-directories = "6.0.0"
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+tauri = { version = "2.10", features = [] }
+clap = { version = "4", features = ["derive"] }
+data-encoding = "2"
+directories = "6"
 libfortress = { version = "2", path = "../../libfortress" }
-url = "2.5.8"
-tauri-plugin-dialog = "2.6.0"
+url = "2"
+tauri-plugin-dialog = "2.6"
 
 [features]
 # by default Tauri runs in production mode

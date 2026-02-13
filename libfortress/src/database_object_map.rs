@@ -119,7 +119,7 @@ impl<'a> IntoIterator for &'a DatabaseObjectMap {
 
 #[cfg(test)]
 mod tests {
-	use rand::{rngs::OsRng, Rng, TryRngCore};
+	use rand::{rand_core::UnwrapErr, rngs::SysRng, RngExt};
 
 	use crate::Directory;
 
@@ -154,7 +154,7 @@ mod tests {
 
 		let mut directory = Directory::new();
 		let old_directory = directory.clone();
-		directory.add(OsRng.unwrap_err().random());
+		directory.add(UnwrapErr(SysRng).random());
 
 		object_map.update(DatabaseObject::Directory(directory));
 		object_map.update(DatabaseObject::Directory(old_directory));

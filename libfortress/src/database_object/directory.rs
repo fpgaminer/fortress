@@ -1,7 +1,7 @@
 use crate::ROOT_DIRECTORY_ID;
 
 use super::super::{unix_timestamp, Database, ID};
-use rand::{rngs::OsRng, Rng, TryRngCore};
+use rand::{rand_core::UnwrapErr, rngs::SysRng, RngExt};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
@@ -24,7 +24,7 @@ impl Directory {
 	#[allow(clippy::new_without_default)]
 	pub fn new() -> Directory {
 		Directory {
-			id: OsRng.unwrap_err().random(),
+			id: UnwrapErr(SysRng).random(),
 			history: Vec::new(),
 			entries: HashSet::new(),
 			name: None,
@@ -247,7 +247,7 @@ pub enum DirectoryHistoryAction {
 mod tests {
 	use super::{Directory, DirectoryHistory, DirectoryHistoryAction};
 	use crate::tests::quick_sleep;
-	use rand::{rngs::OsRng, Rng, TryRngCore};
+	use rand::{rand_core::UnwrapErr, rngs::SysRng, RngExt};
 	use serde_json;
 
 	#[test]
@@ -255,11 +255,11 @@ mod tests {
 		let mut bad_directory1 = Directory::new();
 		bad_directory1.history = vec![
 			DirectoryHistory {
-				action: DirectoryHistoryAction::Add(OsRng.unwrap_err().random()),
+				action: DirectoryHistoryAction::Add(UnwrapErr(SysRng).random()),
 				time: 50,
 			},
 			DirectoryHistory {
-				action: DirectoryHistoryAction::Add(OsRng.unwrap_err().random()),
+				action: DirectoryHistoryAction::Add(UnwrapErr(SysRng).random()),
 				time: 0,
 			},
 		];
@@ -273,7 +273,7 @@ mod tests {
 	fn history_must_be_consistent() {
 		{
 			let mut bad_directory = Directory::new();
-			let id1 = OsRng.unwrap_err().random();
+			let id1 = UnwrapErr(SysRng).random();
 			bad_directory.history = vec![
 				DirectoryHistory {
 					action: DirectoryHistoryAction::Add(id1),
@@ -292,7 +292,7 @@ mod tests {
 		{
 			let mut bad_directory = Directory::new();
 			bad_directory.history = vec![DirectoryHistory {
-				action: DirectoryHistoryAction::Remove(OsRng.unwrap_err().random()),
+				action: DirectoryHistoryAction::Remove(UnwrapErr(SysRng).random()),
 				time: 0,
 			}];
 
@@ -305,7 +305,7 @@ mod tests {
 	#[should_panic]
 	fn bad_add_should_panic1() {
 		let mut directory = Directory::new();
-		let id = OsRng.unwrap_err().random();
+		let id = UnwrapErr(SysRng).random();
 		directory.add(id);
 		quick_sleep();
 		directory.add(id);
@@ -315,22 +315,22 @@ mod tests {
 	#[should_panic]
 	fn bad_add_should_panic2() {
 		let mut directory = Directory::new();
-		directory.add_with_time(OsRng.unwrap_err().random(), 42);
-		directory.add_with_time(OsRng.unwrap_err().random(), 0);
+		directory.add_with_time(UnwrapErr(SysRng).random(), 42);
+		directory.add_with_time(UnwrapErr(SysRng).random(), 0);
 	}
 
 	#[test]
 	#[should_panic]
 	fn bad_remove_should_panic1() {
 		let mut directory = Directory::new();
-		directory.remove(OsRng.unwrap_err().random());
+		directory.remove(UnwrapErr(SysRng).random());
 	}
 
 	#[test]
 	#[should_panic]
 	fn bad_remove_should_panic2() {
 		let mut directory = Directory::new();
-		let id = OsRng.unwrap_err().random();
+		let id = UnwrapErr(SysRng).random();
 		directory.add_with_time(id, 1000);
 		directory.remove_with_time(id, 999);
 	}
@@ -349,9 +349,9 @@ mod tests {
 		// Merge should fail if IDs don't match
 		{
 			let mut directory1 = Directory::new();
-			directory1.add(OsRng.unwrap_err().random());
+			directory1.add(UnwrapErr(SysRng).random());
 			let mut directory2 = directory1.clone();
-			directory2.id = OsRng.unwrap_err().random();
+			directory2.id = UnwrapErr(SysRng).random();
 			assert!(directory1.merge(&directory2).is_none());
 			assert!(!directory1.safe_to_replace_with(&directory2));
 		}
@@ -359,10 +359,10 @@ mod tests {
 		// Merge should fail on conflict
 		{
 			let mut directory1 = Directory::new();
-			directory1.add(OsRng.unwrap_err().random());
+			directory1.add(UnwrapErr(SysRng).random());
 			quick_sleep();
 			let mut directory2 = directory1.clone();
-			let id = OsRng.unwrap_err().random();
+			let id = UnwrapErr(SysRng).random();
 			directory1.add(id);
 			quick_sleep();
 			directory2.add(id);
@@ -374,28 +374,28 @@ mod tests {
 		{
 			let mut directory1 = Directory::new();
 			let mut directory2 = directory1.clone();
-			directory1.add(OsRng.unwrap_err().random());
+			directory1.add(UnwrapErr(SysRng).random());
 			quick_sleep();
-			directory2.add(OsRng.unwrap_err().random());
+			directory2.add(UnwrapErr(SysRng).random());
 			assert!(!directory1.safe_to_replace_with(&directory2));
 		}
 
 		// Always safe to replace after merging
 		{
 			let mut directory1 = Directory::new();
-			directory1.add(OsRng.unwrap_err().random());
+			directory1.add(UnwrapErr(SysRng).random());
 			quick_sleep();
-			let id = OsRng.unwrap_err().random();
+			let id = UnwrapErr(SysRng).random();
 			directory1.add(id);
 			quick_sleep();
-			directory1.add(OsRng.unwrap_err().random());
+			directory1.add(UnwrapErr(SysRng).random());
 			quick_sleep();
 			let mut directory2 = directory1.clone();
-			directory2.add(OsRng.unwrap_err().random());
+			directory2.add(UnwrapErr(SysRng).random());
 			quick_sleep();
 			directory2.remove(id);
 			quick_sleep();
-			directory1.add(OsRng.unwrap_err().random());
+			directory1.add(UnwrapErr(SysRng).random());
 
 			assert_eq!(directory1.safe_to_replace_with(&directory2), false);
 			let merged1 = directory1.merge(&directory2).unwrap();

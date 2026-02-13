@@ -1,5 +1,5 @@
 use super::super::{unix_timestamp, ID};
-use rand::{rngs::OsRng, Rng, TryRngCore};
+use rand::{rand_core::UnwrapErr, rngs::SysRng, RngExt};
 use serde::{Deserialize, Serialize};
 use std::{
 	borrow::Borrow,
@@ -24,7 +24,7 @@ pub struct Entry {
 impl Entry {
 	#[allow(clippy::new_without_default)]
 	pub fn new() -> Entry {
-		Entry::inner_new(OsRng.unwrap_err().random(), Vec::new(), unix_timestamp()).unwrap()
+		Entry::inner_new(UnwrapErr(SysRng).random(), Vec::new(), unix_timestamp()).unwrap()
 	}
 
 	fn inner_new(id: ID, history: Vec<EntryHistory>, time_created: u64) -> Option<Entry> {
@@ -226,7 +226,7 @@ mod tests {
 
 	use super::{Entry, EntryHistory};
 	use crate::{tests::random_uniform_string, unix_timestamp};
-	use rand::{rng, rngs::OsRng, Rng, TryRngCore};
+	use rand::{rand_core::UnwrapErr, rng, rngs::SysRng, RngExt};
 	use serde_json;
 
 	fn random_entry_history(time: Option<u64>) -> EntryHistory {
@@ -267,7 +267,7 @@ mod tests {
 			let mut entry1 = Entry::new();
 			entry1.edit(random_entry_history(None));
 			let mut entry2 = entry1.clone();
-			entry2.id = OsRng.unwrap_err().random();
+			entry2.id = UnwrapErr(SysRng).random();
 
 			assert!(entry1.merge(&entry2).is_none());
 			assert!(!entry1.safe_to_replace_with(&entry2));
